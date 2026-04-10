@@ -12,7 +12,7 @@ class PayloadBuilder:
         codigo_vendedor: int,
         cnpj_service=None,
         logger=None,
-        zerar_ipi_itens: bool = False,
+        ipi_strategy: str = "discount_compensation",
     ):
         self.ibge_service = ibge_service
         self.produto_mapper = produto_mapper
@@ -22,7 +22,7 @@ class PayloadBuilder:
         self.codigo_vendedor = codigo_vendedor
         self.cnpj_service = cnpj_service
         self.logger = logger
-        self.zerar_ipi_itens = zerar_ipi_itens
+        self.ipi_strategy = ipi_strategy
 
     def montar(self, pedido_wake: dict) -> dict:
         pedido_norm = normalizar_pedido_wake(
@@ -32,14 +32,15 @@ class PayloadBuilder:
             pagamento_mapper=self.pagamento_mapper,
             cnpj_service=self.cnpj_service,
             logger=self.logger,
-            zerar_ipi_itens=self.zerar_ipi_itens,
+            ipi_strategy=self.ipi_strategy,
         )
+        return self.montar_com_pedido_normalizado(pedido_norm)
 
+    def montar_com_pedido_normalizado(self, pedido_norm: dict) -> dict:
         cidade = pedido_norm["cliente"]["endereco"]["cidade"]
         uf = pedido_norm["cliente"]["endereco"]["uf"]
         codigo_ibge = self.ibge_service.obter_codigo_ibge(cidade, uf)
 
-        # 👇 NOVO BLOCO: filtrar itens corretamente
         itens_payload = []
         for item in pedido_norm["itens"]:
             item_payload = {
@@ -51,7 +52,9 @@ class PayloadBuilder:
                 "valorUnitario": item["valorUnitario"],
             }
 
-            # 👇 importante: só inclui se existir
+            if "valorDesconto" in item:
+                item_payload["valorDesconto"] = item["valorDesconto"]
+
             if item.get("impostos"):
                 item_payload["impostos"] = item["impostos"]
 

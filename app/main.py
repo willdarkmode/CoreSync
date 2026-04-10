@@ -9,9 +9,12 @@ from app.validators import (
 )
 from app.clients.wake_client import WakeClient
 from app.clients.sankhya_client import SankhyaClient
+from app.clients.fiscal_client import FiscalClient
 from app.services.cnpj_service import CnpjService
 from app.services.ibge_service import IbgeService
 from app.services.payload_builder import PayloadBuilder
+from app.services.ipi_service import IpiCompensationService
+from app.services.normalizer import normalizar_pedido_wake
 from app.mappers import ProdutoMapper, PagamentoMapper
 from app.exceptions import IntegracaoError
 
@@ -38,6 +41,23 @@ def main():
             timeout=settings.timeout_padrao,
         )
 
+        access_token = sankhya_client.get_access_token()
+
+        fiscal_client = FiscalClient(
+            base_url=settings.sankhya_base_url,
+            auth_token=access_token,
+            timeout=settings.timeout_padrao,
+        )
+
+        ipi_service = IpiCompensationService(
+            fiscal_client=fiscal_client,
+            nota_modelo=settings.nota_modelo,
+            codigo_cliente_referencia=settings.codigo_cliente_fiscal_referencia,
+            codigo_empresa=settings.codigo_empresa,
+            unidade_padrao=settings.unidade_padrao,
+            logger=logger,
+        )
+
         ibge_service = IbgeService(timeout=settings.timeout_padrao)
         produto_mapper = ProdutoMapper()
         pagamento_mapper = PagamentoMapper(settings.tipo_pagamento_padrao)
@@ -51,7 +71,7 @@ def main():
             codigo_vendedor=settings.codigo_vendedor,
             cnpj_service=cnpj_service,
             logger=logger,
-            zerar_ipi_itens=settings.zerar_ipi_itens,
+            ipi_strategy=settings.ipi_strategy,
         )
 
         numero_pedido = input("Digite o número do pedido Wake: ").strip()
@@ -60,9 +80,39 @@ def main():
         pedido_wake = wake_client.buscar_pedido(numero_pedido)
         validar_pedido_wake_bruto(pedido_wake)
 
-        logger.info("Montando payload Sankhya...")
-        payload, pedido_normalizado = payload_builder.montar(pedido_wake)
+        logger.info("Normalizando pedido Wake...")
+        pedido_normalizado = normalizar_pedido_wake(
+            pedido_wake=pedido_wake,
+            codigo_local_estoque=settings.codigo_local_estoque,
+            produto_mapper=produto_mapper,
+            pagamento_mapper=pagamento_mapper,
+            cnpj_service=cnpj_service,
+            logger=logger,
+            ipi_strategy=settings.ipi_strategy,
+        )
+
         validar_pedido_normalizado(pedido_normalizado)
+
+        logger.info("Calculando compensações de IPI...")
+        compensacoes = ipi_service.calcular_compensacoes(
+            itens=pedido_normalizado["itens"],
+        )
+
+        comp_map = {int(c["sequencia"]): c for c in compensacoes}
+
+        for item in pedido_normalizado["itens"]:
+            comp = comp_map.get(int(item["sequencia"]))
+
+            if not comp:
+                continue
+
+            item["valorDesconto"] = comp["valorDesconto"]
+            item["aliquotaIpiCompensada"] = comp["aliquotaIpi"]
+
+        logger.info("Montando payload Sankhya...")
+        payload, pedido_normalizado = payload_builder.montar_com_pedido_normalizado(
+            pedido_normalizado
+        )
 
         print("\nPayload final:")
         print(json.dumps(payload, indent=2, ensure_ascii=False))

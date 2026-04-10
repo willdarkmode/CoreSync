@@ -34,6 +34,7 @@ def obter_tipo_cliente(usuario: dict) -> str:
     tipo = (usuario.get("tipoPessoa") or "").strip().lower()
     return "PF" if tipo == "fisica" else "PJ"
 
+
 def enriquecer_ie_cliente(cliente: dict, cnpj_service=None, logger=None) -> dict:
     tipo = cliente.get("tipo")
     cnpj_cpf = cliente.get("cnpjCpf", "")
@@ -41,10 +42,8 @@ def enriquecer_ie_cliente(cliente: dict, cnpj_service=None, logger=None) -> dict
 
     if tipo != "PJ":
         return cliente
-
     if ie_atual:
         return cliente
-
     if not cnpj_service:
         return cliente
 
@@ -53,16 +52,13 @@ def enriquecer_ie_cliente(cliente: dict, cnpj_service=None, logger=None) -> dict
         if dados and dados.get("inscricao_estadual"):
             cliente["ieRg"] = dados["inscricao_estadual"]
             if logger:
-                logger.info(
-                    "IE enriquecida via CNPJ.ws para CNPJ %s",
-                    cnpj_cpf
-                )
+                logger.info("IE enriquecida via CNPJ.ws para CNPJ %s", cnpj_cpf)
     except Exception as exc:
         if logger:
             logger.warning(
                 "Falha ao enriquecer IE via CNPJ.ws para CNPJ %s: %s",
                 cnpj_cpf,
-                exc
+                exc,
             )
 
     return cliente
@@ -84,6 +80,77 @@ def calcular_valor_unitario_final(item: dict) -> float:
     return round(valor_unitario, 2)
 
 
+def calcular_valor_total_item(item: dict) -> Decimal:
+    quantidade = Decimal(str(safe_float(item.get("quantidade", 0), 0.0)))
+    valor_unitario = Decimal(str(calcular_valor_unitario_final(item)))
+    return money_2(quantidade * valor_unitario)
+
+
+def extrair_aliquota_ipi_item(item_wake: dict) -> Decimal:
+    """
+    Tenta descobrir a alíquota de IPI no item da Wake.
+    Ajuste esta função conforme o shape real do payload recebido.
+    """
+    candidatos_diretos = [
+        item_wake.get("aliquotaIPI"),
+        item_wake.get("aliquotaIpi"),
+        item_wake.get("ipiAliquota"),
+        item_wake.get("percentualIPI"),
+        item_wake.get("percentualIpi"),
+    ]
+
+    for valor in candidatos_diretos:
+        dec = to_decimal(valor)
+        if dec > 0:
+            return dec
+
+    # procura em possíveis blocos de impostos
+    blocos = []
+    for chave in ("impostos", "tributos", "taxas"):
+        valor = item_wake.get(chave)
+        if isinstance(valor, list):
+            blocos.extend(valor)
+
+    for imposto in blocos:
+        tipo = str(imposto.get("tipo") or imposto.get("nome") or "").strip().lower()
+        if tipo == "ipi":
+            for chave in ("aliquota", "percentual", "valorAliquota"):
+                dec = to_decimal(imposto.get(chave))
+                if dec > 0:
+                    return dec
+
+    return Decimal("0.00")
+
+
+def calcular_compensacao_ipi_item(item_wake: dict) -> dict:
+    """
+    Calcula o desconto necessário para neutralizar o acréscimo do IPI no total.
+    """
+    base_item = calcular_valor_total_item(item_wake)
+    aliquota_ipi = extrair_aliquota_ipi_item(item_wake)
+
+    if base_item <= 0 or aliquota_ipi <= 0:
+        return {
+            "aliquotaIpi": 0.0,
+            "valorBaseDesconto": float(base_item),
+            "valorDesconto": 0.0,
+            "percentualDesconto": 0.0,
+        }
+
+    valor_desconto = money_2(base_item * (aliquota_ipi / Decimal("100")))
+    percentual_desconto = Decimal("0.00")
+
+    if base_item > 0:
+        percentual_desconto = money_2((valor_desconto / base_item) * Decimal("100"))
+
+    return {
+        "aliquotaIpi": float(aliquota_ipi),
+        "valorBaseDesconto": float(base_item),
+        "valorDesconto": float(valor_desconto),
+        "percentualDesconto": float(percentual_desconto),
+    }
+
+
 def montar_financeiros(
     pedido_wake: dict,
     valor_total: float,
@@ -92,7 +159,6 @@ def montar_financeiros(
     pagamentos = pedido_wake.get("pagamento", [])
     data_base = pedido_wake.get("dataPagamento") or pedido_wake.get("data")
     data_base_dt = parse_datetime_iso_flex(data_base)
-
     valor_total_dec = money_2(to_decimal(valor_total))
 
     if not pagamentos:
@@ -112,26 +178,11 @@ def montar_financeiros(
         tipo_pagamento = pagamento_mapper.obter_tipo_pagamento(pedido_wake, pagamento)
         offset_inicial = 1 if pagamento_mapper.primeira_parcela_no_proximo_mes(pagamento) else 0
 
-        info_debug = pagamento.get("informacoesAdicionais", [])
-        print("\n[DEBUG PAGAMENTO]")
-        print(f"numero_parcelas={numero_parcelas}")
-        print(f"tipo_pagamento_sankhya={tipo_pagamento}")
-        print(f"eh_cartao={pagamento_mapper.eh_cartao(pagamento)}")
-        print(f"eh_pix={pagamento_mapper.eh_pix(pagamento)}")
-        print(f"eh_boleto={pagamento_mapper.eh_boleto(pagamento)}")
-        print(f"informacoesAdicionais={info_debug}")
-
         valor_total_pagamento = to_decimal(pagamento.get("valorTotal", 0))
-        valor_parcela_wake = to_decimal(pagamento.get("valorParcela", 0))
-
-        # Preferência:
-        # 1) usar valorTotal do bloco e redistribuir com precisão em 2 casas
-        # 2) se não houver, cair para valor_total do pedido
         base_total = money_2(valor_total_pagamento) if valor_total_pagamento > 0 else valor_total_dec
 
         if numero_parcelas <= 1:
             valor = money_2(base_total)
-
             data_parcela = adicionar_meses(data_base_dt, offset_inicial)
             financeiros.append({
                 "sequencia": sequencia,
@@ -139,13 +190,10 @@ def montar_financeiros(
                 "dataVencimento": data_parcela.strftime("%d/%m/%Y"),
                 "valorParcela": float(valor),
             })
-
             total_gerado += valor
             sequencia += 1
             continue
 
-        # Distribuição correta em 2 casas:
-        # Ex.: 412.86 / 8 => 51.61 x 7 + 51.59
         valor_base = money_2(base_total / Decimal(numero_parcelas))
         acumulado_bloco = Decimal("0.00")
 
@@ -156,14 +204,12 @@ def montar_financeiros(
                 valor = money_2(base_total - acumulado_bloco)
 
             data_parcela = adicionar_meses(data_base_dt, offset_inicial + i)
-
             financeiros.append({
                 "sequencia": sequencia,
                 "tipoPagamento": tipo_pagamento,
                 "dataVencimento": data_parcela.strftime("%d/%m/%Y"),
                 "valorParcela": float(valor),
             })
-
             acumulado_bloco += valor
             total_gerado += valor
             sequencia += 1
@@ -177,19 +223,20 @@ def montar_financeiros(
 
     return financeiros
 
+
 def montar_impostos_item(
     item_wake: dict,
-    zerar_ipi_itens: bool = False,
+    ipi_strategy: str = "discount_compensation",
 ) -> list[dict]:
     impostos = []
 
-    if zerar_ipi_itens:
+    if ipi_strategy == "force_zero_ipi":
         impostos.append({
             "tipo": "ipi",
             "aliquota": 100,
             "valorImposto": 0,
             "valorBase": 0,
-            "reducaoAliquota": 100
+            "reducaoAliquota": 100,
         })
 
     return impostos
@@ -202,7 +249,7 @@ def normalizar_pedido_wake(
     pagamento_mapper: PagamentoMapper,
     cnpj_service=None,
     logger=None,
-    zerar_ipi_itens: bool = False,
+    ipi_strategy: str = "discount_compensation",
 ) -> dict:
     usuario = pedido_wake.get("usuario", {})
     endereco = obter_endereco_entrega(pedido_wake)
@@ -210,11 +257,12 @@ def normalizar_pedido_wake(
     ddd, numero_tel = quebrar_telefone(telefone)
 
     itens_norm = []
+
     for idx, item in enumerate(pedido_wake.get("itens", []), start=1):
         sku = item.get("sku", "")
         impostos_item = montar_impostos_item(
             item_wake=item,
-            zerar_ipi_itens=zerar_ipi_itens,
+            ipi_strategy=ipi_strategy,
         )
 
         item_norm = {
@@ -227,6 +275,23 @@ def normalizar_pedido_wake(
             "skuOriginal": sku,
             "nomeProduto": item.get("nome", ""),
         }
+
+        if ipi_strategy == "discount_compensation":
+            compensacao = calcular_compensacao_ipi_item(item)
+            item_norm["valorDesconto"] = compensacao["valorDesconto"]
+            item_norm["percentualDesconto"] = compensacao["percentualDesconto"]
+            item_norm["aliquotaIpiCompensada"] = compensacao["aliquotaIpi"]
+
+            if logger and compensacao["valorDesconto"] > 0:
+                logger.info(
+                    "Compensação de IPI aplicada no item seq=%s sku=%s base=%.2f aliquota_ipi=%.4f desconto=%.2f perc_desc=%.4f",
+                    idx,
+                    sku,
+                    compensacao["valorBaseDesconto"],
+                    compensacao["aliquotaIpi"],
+                    compensacao["valorDesconto"],
+                    compensacao["percentualDesconto"],
+                )
 
         if impostos_item:
             item_norm["impostos"] = impostos_item
