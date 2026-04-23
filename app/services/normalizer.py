@@ -1,4 +1,6 @@
 from decimal import Decimal
+import re
+from datetime import timedelta
 
 from app.utils import (
     somente_digitos,
@@ -63,6 +65,160 @@ def enriquecer_ie_cliente(cliente: dict, cnpj_service=None, logger=None) -> dict
 
     return cliente
 
+def obter_valor_grupo_info_cadastral(usuario: dict, chave: str) -> str:
+    grupos = usuario.get("grupoInformacaoCadastral") or []
+    chave_normalizada = (chave or "").strip().lower()
+
+    for item in grupos:
+        chave_item = str(item.get("chave") or "").strip().lower()
+        if chave_item == chave_normalizada:
+            return str(item.get("valor") or "").strip()
+
+    return ""
+
+def extrair_dias_prazo_envio(pedido_wake: dict, logger=None) -> int | None:
+    frete = pedido_wake.get("frete") or {}
+
+    prazo_dias = frete.get("prazoEnvio")
+    if prazo_dias is not None:
+        try:
+            dias = int(prazo_dias)
+            if logger:
+                logger.info(
+                    "Prazo de envio identificado na Wake via prazoEnvio=%s dia(s)",
+                    dias,
+                )
+            return dias
+        except (TypeError, ValueError):
+            if logger:
+                logger.warning(
+                    "Valor inválido em frete.prazoEnvio: %s",
+                    prazo_dias,
+                )
+
+    prazo_texto = str(frete.get("prazoEnvioTexto") or "").strip().lower()
+    if prazo_texto:
+        import re
+
+        match = re.search(r"(\d+)", prazo_texto)
+        if match:
+            dias = int(match.group(1))
+            if logger:
+                logger.info(
+                    "Prazo de envio identificado na Wake via prazoEnvioTexto='%s' -> %s dia(s)",
+                    prazo_texto,
+                    dias,
+                )
+            return dias
+
+        if logger:
+            logger.warning(
+                "Não foi possível extrair dias de frete.prazoEnvioTexto='%s'",
+                prazo_texto,
+            )
+
+    if logger:
+        logger.info("Prazo de envio não informado na Wake.")
+
+    return None
+
+def calcular_previsao_entrega(pedido_wake: dict, logger=None) -> str:
+    data_pedido_raw = (
+        pedido_wake.get("data")
+        or pedido_wake.get("dataPedido")
+        or pedido_wake.get("dataCriacao")
+        or pedido_wake.get("criadoEm")
+        or ""
+    )
+
+    dt_pedido = parse_datetime_iso_flex(data_pedido_raw)
+    if not dt_pedido:
+        if logger:
+            logger.warning(
+                "Não foi possível calcular AD_PREVENT: data do pedido inválida '%s'",
+                data_pedido_raw,
+            )
+        return ""
+
+    dias_prazo = extrair_dias_prazo_envio(pedido_wake, logger=logger)
+    if dias_prazo is None:
+        if logger:
+            logger.info(
+                "Prazo de envio não informado. AD_PREVENT não será preenchido."
+            )
+        return ""
+
+    dt_prevista = dt_pedido + timedelta(days=dias_prazo)
+    data_prevista = dt_prevista.strftime("%d/%m/%Y")
+
+    if logger:
+        logger.info(
+            "Previsão de entrega calculada: data_base='%s' + %s dia(s) -> AD_PREVENT=%s",
+            data_pedido_raw,
+            dias_prazo,
+            data_prevista,
+        )
+
+    return data_prevista
+
+def mapear_finalidade_compra_para_nufop(pedido_wake: dict, logger=None) -> int:
+    usuario = pedido_wake.get("usuario") or {}
+    finalidade = obter_valor_grupo_info_cadastral(usuario, "Finalidade de compra")
+    finalidade_normalizada = finalidade.strip().lower()
+
+    mapa = {
+        "revenda": 5,
+        "industrialização": 6,
+        "industrializacao": 6,
+        "uso e consumo": 4,
+        "uso/consumo": 4,
+    }
+
+    nufop = mapa.get(finalidade_normalizada, 4)
+
+    if logger:
+        if finalidade:
+            logger.info(
+                "Finalidade de compra identificada na Wake: '%s' -> NUFOP=%s",
+                finalidade,
+                nufop,
+            )
+        else:
+            logger.info(
+                "Finalidade de compra não informada na Wake. Usando NUFOP padrão=%s",
+                nufop,
+            )
+
+    return nufop
+
+
+def mapear_frete_para_cif_fob(pedido_wake: dict, logger=None) -> str:
+    frete = pedido_wake.get("frete") or {}
+    frete_contrato = str(frete.get("freteContrato") or "").strip()
+    frete_contrato_normalizado = frete_contrato.lower()
+
+    if "fob" in frete_contrato_normalizado:
+        if logger:
+            logger.info(
+                "Tipo de frete identificado na Wake: '%s' -> CIF_FOB=F",
+                frete_contrato,
+            )
+        return "F"
+
+    if "cif" in frete_contrato_normalizado:
+        if logger:
+            logger.info(
+                "Tipo de frete identificado na Wake: '%s' -> CIF_FOB=C",
+                frete_contrato,
+            )
+        return "C"
+
+    if logger:
+        logger.info(
+            "Tipo de frete não identificado na Wake. Usando CIF_FOB padrão=C"
+        )
+
+    return "C"
 
 def calcular_valor_unitario_final(item: dict) -> float:
     quantidade = safe_float(item.get("quantidade", 1), 1.0)
@@ -307,6 +463,9 @@ def normalizar_pedido_wake(
         "data": data_fmt,
         "hora": hora_fmt,
         "valorTotal": valor_total,
+        "nufop": mapear_finalidade_compra_para_nufop(pedido_wake, logger=logger),
+        "cifFob": mapear_frete_para_cif_fob(pedido_wake, logger=logger),
+        "previsaoEntrega": calcular_previsao_entrega(pedido_wake, logger=logger),
         "cliente": {
             "atualizar": True,
             "tipo": obter_tipo_cliente(usuario),

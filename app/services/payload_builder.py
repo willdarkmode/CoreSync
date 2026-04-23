@@ -89,6 +89,10 @@ class PayloadBuilder:
             "codigoVendedor": self.codigo_vendedor,
             "valorTotal": pedido_norm["valorTotal"],
             "AD_ECOMMERCE": "S",
+            "NUFOP": pedido_norm["nufop"],
+            "CIF_FOB": pedido_norm["cifFob"],
+            "AD_PREVENT": pedido_norm["previsaoEntrega"],
+            "AD_CATEGORIA": "P1",
             "itens": itens_payload,
             "financeiros": pedido_norm["financeiros"],
         }
