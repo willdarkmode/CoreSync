@@ -93,8 +93,14 @@ class PayloadBuilder:
             "CIF_FOB": pedido_norm["cifFob"],
             "AD_PREVENT": pedido_norm["previsaoEntrega"],
             "AD_CATEGORIA": "P1",
+            "AD_OBSFIN": pedido_norm.get("observacaoFinanceira", ""),
+            "VLRFRETE": pedido_norm.get("valorFrete", 0),
             "itens": itens_payload,
             "financeiros": pedido_norm["financeiros"],
         }
+        codigo_transportadora = pedido_norm.get("codigoTransportadora")
+
+        if codigo_transportadora:
+            payload["CODPARCTRANSP"] = codigo_transportadora
 
         return payload, pedido_norm

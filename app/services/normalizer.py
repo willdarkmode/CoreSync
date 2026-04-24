@@ -14,6 +14,12 @@ from app.utils import (
 )
 from app.mappers import ProdutoMapper, PagamentoMapper
 
+TRANSPORTADORAS_MAP = {
+    "sedex": 2994,
+    "pac": 2994,
+    "jadlog": 3268,
+    "mercado livre": 3090,
+}
 
 def obter_endereco_entrega(pedido_wake: dict) -> dict:
     enderecos = pedido_wake.get("pedidoEndereco", [])
@@ -161,6 +167,87 @@ def calcular_previsao_entrega(pedido_wake: dict, logger=None) -> str:
 
     return data_prevista
 
+def normalizar_texto(valor: str) -> str:
+    return str(valor or "").strip().lower()
+
+
+def obter_codigo_transportadora(pedido_wake: dict) -> int | None:
+    frete = pedido_wake.get("frete") or {}
+
+    candidatos = [
+        frete.get("freteContrato"),
+        frete.get("referenciaConector"),
+        frete.get("grupoFreteNome"),
+        pedido_wake.get("canalNome"),
+        pedido_wake.get("canalOrigem"),
+    ]
+
+    for candidato in candidatos:
+        nome = normalizar_texto(candidato)
+
+        if not nome:
+            continue
+
+        for chave, codigo in TRANSPORTADORAS_MAP.items():
+            if chave in nome:
+                return codigo
+
+    return None
+
+def obter_sigla_canal(pedido_wake: dict) -> str:
+    canal = (
+        pedido_wake.get("canalNome")
+        or pedido_wake.get("canalOrigem")
+        or ""
+    ).strip().lower()
+
+    mapa = {
+        "mercado livre": "ML",
+        "magalu": "MAG",
+        "amazon": "AMZ",
+        "shopee": "SHP",
+        "loja": "SITE",
+    }
+
+    return mapa.get(canal, canal.upper() if canal else "SITE")
+
+
+def obter_codigo_venda(pedido_wake: dict) -> str:
+    # prioridade: marketplace
+    if pedido_wake.get("marketPlacePedidoId"):
+        return str(pedido_wake["marketPlacePedidoId"])
+
+    omnichannel = pedido_wake.get("omnichannel") or {}
+
+    if omnichannel.get("pedidoIdPrivado"):
+        return str(omnichannel["pedidoIdPrivado"])
+
+    if omnichannel.get("pedidoIdPublico"):
+        return str(omnichannel["pedidoIdPublico"])
+
+    # fallback: pedido interno
+    return str(pedido_wake.get("pedidoId") or "")
+
+
+def formatar_data_obsfin(data_iso: str) -> str:
+    dt = parse_datetime_iso_flex(data_iso)
+
+    meses = {
+        1: "jan", 2: "fev", 3: "mar", 4: "abr",
+        5: "mai", 6: "jun", 7: "jul", 8: "ago",
+        9: "set", 10: "out", 11: "nov", 12: "dez",
+    }
+
+    return f"{dt.day} {meses[dt.month]} {dt.strftime('%H:%M')} hs"
+
+
+def montar_observacao_financeira(pedido_wake: dict) -> str:
+    sigla = obter_sigla_canal(pedido_wake)
+    codigo = obter_codigo_venda(pedido_wake)
+    data = formatar_data_obsfin(pedido_wake.get("data"))
+
+    return f"{sigla}\n\nVenda #{codigo} {data}"
+
 def mapear_finalidade_compra_para_nufop(pedido_wake: dict, logger=None) -> int:
     usuario = pedido_wake.get("usuario") or {}
     finalidade = obter_valor_grupo_info_cadastral(usuario, "Finalidade de compra")
@@ -191,6 +278,19 @@ def mapear_finalidade_compra_para_nufop(pedido_wake: dict, logger=None) -> int:
 
     return nufop
 
+def obter_valor_frete(pedido_wake: dict) -> float:
+    frete = pedido_wake.get("frete") or {}
+
+    return round(
+        safe_float(
+            pedido_wake.get("valorFrete")
+            or frete.get("valorFreteCliente")
+            or frete.get("valorFreteEmpresa")
+            or 0,
+            0.0,
+        ),
+        2,
+    ) 
 
 def mapear_frete_para_cif_fob(pedido_wake: dict, logger=None) -> str:
     frete = pedido_wake.get("frete") or {}
@@ -222,17 +322,25 @@ def mapear_frete_para_cif_fob(pedido_wake: dict, logger=None) -> str:
 
 def calcular_valor_unitario_final(item: dict) -> float:
     quantidade = safe_float(item.get("quantidade", 1), 1.0)
+
     if quantidade <= 0:
         quantidade = 1.0
 
     valor_base = safe_float(item.get("valorItem", 0), 0.0)
 
     total_ajustes = 0.0
+
     for ajuste in item.get("ajustes", []):
+        nome_ajuste = str(ajuste.get("nome") or "").strip().lower()
+
+        if nome_ajuste == "frete":
+            continue
+
         total_ajustes += safe_float(ajuste.get("valor", 0), 0.0)
 
     valor_total_item = valor_base + total_ajustes
     valor_unitario = valor_total_item / quantidade
+
     return round(valor_unitario, 2)
 
 
@@ -463,9 +571,12 @@ def normalizar_pedido_wake(
         "data": data_fmt,
         "hora": hora_fmt,
         "valorTotal": valor_total,
+        "observacaoFinanceira": montar_observacao_financeira(pedido_wake),
         "nufop": mapear_finalidade_compra_para_nufop(pedido_wake, logger=logger),
         "cifFob": mapear_frete_para_cif_fob(pedido_wake, logger=logger),
         "previsaoEntrega": calcular_previsao_entrega(pedido_wake, logger=logger),
+        "codigoTransportadora": obter_codigo_transportadora(pedido_wake),
+        "valorFrete": obter_valor_frete(pedido_wake),
         "cliente": {
             "atualizar": True,
             "tipo": obter_tipo_cliente(usuario),
