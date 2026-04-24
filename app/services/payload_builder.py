@@ -91,6 +91,7 @@ class PayloadBuilder:
             "AD_ECOMMERCE": "S",
             "NUFOP": pedido_norm["nufop"],
             "CIF_FOB": pedido_norm["cifFob"],
+            "CODTIPVENDA": pedido_norm.get("codigoCondicaoPagamento", 11),
             "AD_PREVENT": pedido_norm["previsaoEntrega"],
             "AD_CATEGORIA": "P1",
             "AD_OBSFIN": pedido_norm.get("observacaoFinanceira", ""),

@@ -14,11 +14,34 @@ from app.utils import (
 )
 from app.mappers import ProdutoMapper, PagamentoMapper
 
-TRANSPORTADORAS_MAP = {
-    "sedex": 2994,
-    "pac": 2994,
-    "jadlog": 3268,
-    "mercado livre": 3090,
+TRANSPORTADORAS_CONFIG = [
+    {
+        "codigo": 3268,
+        "match_exato": ["jadlog package", "jadlog"],
+    },
+    {
+        "codigo": 2994,
+        "match_exato": ["pac", "sedex"],
+        "match_contem": ["correios"],
+    },
+    {
+        "codigo": 3090,
+        "match_exato": ["mercado livre"],
+    },
+]
+
+CONDICOES_PAGAMENTO_MAP = {
+    1: 11,    # A VISTA / Pix
+    2: 89,    # 2X CARTAO
+    3: 107,   # 3X CARTAO
+    4: 106,   # 4X CARTAO
+    5: 105,   # 5X CARTAO
+    6: 104,   # 6X CARTAO
+    7: 103,   # 7X CARTAO
+    8: 102,   # 8X CARTAO
+    9: 101,   # 9X CARTAO
+    10: 100,  # 10X CARTAO
+    12: 165,  # 12X CARTAO
 }
 
 def obter_endereco_entrega(pedido_wake: dict) -> dict:
@@ -81,6 +104,43 @@ def obter_valor_grupo_info_cadastral(usuario: dict, chave: str) -> str:
             return str(item.get("valor") or "").strip()
 
     return ""
+
+def obter_numero_parcelas_pedido(pedido_wake: dict) -> int:
+    pagamentos = pedido_wake.get("pagamento") or []
+
+    if not pagamentos:
+        return 1
+
+    maior_numero_parcelas = 1
+
+    for pagamento in pagamentos:
+        parcelas = int(safe_float(pagamento.get("numeroParcelas", 1), 1))
+        maior_numero_parcelas = max(maior_numero_parcelas, parcelas)
+
+    return maior_numero_parcelas
+
+
+def obter_codigo_condicao_pagamento(pedido_wake: dict, logger=None) -> int:
+    parcelas = obter_numero_parcelas_pedido(pedido_wake)
+
+    codigo = CONDICOES_PAGAMENTO_MAP.get(parcelas)
+
+    if codigo:
+        if logger:
+            logger.info(
+                "Condição de pagamento identificada: %sx -> CODTIPVENDA=%s",
+                parcelas,
+                codigo,
+            )
+        return codigo
+
+    if logger:
+        logger.warning(
+            "Condição de pagamento não mapeada para %sx. Usando A VISTA CODTIPVENDA=11",
+            parcelas,
+        )
+
+    return 11
 
 def extrair_dias_prazo_envio(pedido_wake: dict, logger=None) -> int | None:
     frete = pedido_wake.get("frete") or {}
@@ -171,7 +231,7 @@ def normalizar_texto(valor: str) -> str:
     return str(valor or "").strip().lower()
 
 
-def obter_codigo_transportadora(pedido_wake: dict) -> int | None:
+def obter_codigo_transportadora(pedido_wake: dict, logger=None) -> int | None:
     frete = pedido_wake.get("frete") or {}
 
     candidatos = [
@@ -182,15 +242,28 @@ def obter_codigo_transportadora(pedido_wake: dict) -> int | None:
         pedido_wake.get("canalOrigem"),
     ]
 
-    for candidato in candidatos:
-        nome = normalizar_texto(candidato)
+    candidatos = [
+        normalizar_texto(c)
+        for c in candidatos
+        if c
+    ]
 
-        if not nome:
-            continue
+    # 🔥 1. match exato (prioridade máxima)
+    for nome in candidatos:
+        for regra in TRANSPORTADORAS_CONFIG:
+            for termo in regra.get("match_exato", []):
+                if nome == termo:
+                    return regra["codigo"]
 
-        for chave, codigo in TRANSPORTADORAS_MAP.items():
-            if chave in nome:
-                return codigo
+    # 🔥 2. match parcial (fallback)
+    for nome in candidatos:
+        for regra in TRANSPORTADORAS_CONFIG:
+            for termo in regra.get("match_contem", []):
+                if termo in nome:
+                    return regra["codigo"]
+
+    if logger:
+        logger.warning(f"Transportadora não identificada: {candidatos}")
 
     return None
 
@@ -321,14 +394,19 @@ def mapear_frete_para_cif_fob(pedido_wake: dict, logger=None) -> str:
     return "C"
 
 def calcular_valor_unitario_final(item: dict) -> float:
+    valor_unitario = safe_float(
+        item.get("valorItem")
+        or item.get("precoPor")
+        or item.get("precoVenda")
+        or 0,
+        0.0,
+    )
+
+    total_ajustes_unitario = 0.0
     quantidade = safe_float(item.get("quantidade", 1), 1.0)
 
     if quantidade <= 0:
         quantidade = 1.0
-
-    valor_base = safe_float(item.get("valorItem", 0), 0.0)
-
-    total_ajustes = 0.0
 
     for ajuste in item.get("ajustes", []):
         nome_ajuste = str(ajuste.get("nome") or "").strip().lower()
@@ -336,12 +414,12 @@ def calcular_valor_unitario_final(item: dict) -> float:
         if nome_ajuste == "frete":
             continue
 
-        total_ajustes += safe_float(ajuste.get("valor", 0), 0.0)
+        valor_ajuste = safe_float(ajuste.get("valor", 0), 0.0)
 
-    valor_total_item = valor_base + total_ajustes
-    valor_unitario = valor_total_item / quantidade
+        # Se o ajuste vier como total do item, rateia por unidade
+        total_ajustes_unitario += valor_ajuste / quantidade
 
-    return round(valor_unitario, 2)
+    return round(valor_unitario + total_ajustes_unitario, 2)
 
 
 def calcular_valor_total_item(item: dict) -> Decimal:
@@ -577,6 +655,10 @@ def normalizar_pedido_wake(
         "previsaoEntrega": calcular_previsao_entrega(pedido_wake, logger=logger),
         "codigoTransportadora": obter_codigo_transportadora(pedido_wake),
         "valorFrete": obter_valor_frete(pedido_wake),
+        "codigoCondicaoPagamento": obter_codigo_condicao_pagamento(
+            pedido_wake,
+            logger=logger,
+        ),
         "cliente": {
             "atualizar": True,
             "tipo": obter_tipo_cliente(usuario),
