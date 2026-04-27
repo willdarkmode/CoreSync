@@ -1,6 +1,6 @@
 import json
 
-from app.config import get_settings
+from app.config import get_settings, validar_config
 from app.logger import setup_logger
 from app.validators import (
     validar_config,
@@ -17,10 +17,12 @@ from app.services.ipi_service import IpiCompensationService
 from app.services.normalizer import normalizar_pedido_wake
 from app.mappers import ProdutoMapper, PagamentoMapper
 from app.exceptions import IntegracaoError
+from app.services.idempotency_service import IdempotencyService
 
 
 def main():
     settings = get_settings()
+    validar_config(settings)
     logger = setup_logger(settings.log_level)
     cnpj_service = CnpjService(timeout=settings.timeout_padrao)
 
@@ -57,6 +59,14 @@ def main():
             unidade_padrao=settings.unidade_padrao,
             logger=logger,
         )
+
+        idempotency_service = None
+        if settings.idempotency_enabled:
+            idempotency_service = IdempotencyService(
+                credentials_path=settings.firebase_credentials_path,
+                project_id=settings.firebase_project_id,
+                collection=settings.idempotency_collection,
+            )
 
         ibge_service = IbgeService(timeout=settings.timeout_padrao)
         produto_mapper = ProdutoMapper()
@@ -126,8 +136,21 @@ def main():
             print("PERMITIR_ENVIO=false. Apenas simulação.")
             return
 
-        logger.info("Enviando pedido para Sankhya...")
-        resposta = sankhya_client.incluir_pedido(payload)
+        if idempotency_service:
+            logger.info("Reservando pedido para idempotência...")
+            idempotency_service.reservar(numero_pedido, payload)
+
+        try:
+            logger.info("Enviando pedido para Sankhya...")
+            resposta = sankhya_client.incluir_pedido(payload)
+
+        except Exception as exc:
+            if idempotency_service:
+                idempotency_service.marcar_falha(numero_pedido, exc)
+            raise
+
+        if idempotency_service:
+            idempotency_service.marcar_sucesso(numero_pedido, resposta)
 
         print("\nResposta Sankhya:")
         print(json.dumps(resposta, indent=2, ensure_ascii=False))

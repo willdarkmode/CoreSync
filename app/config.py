@@ -28,6 +28,10 @@ class Settings:
     permitir_envio: bool
     log_level: str
     timeout_padrao: int
+    idempotency_enabled: bool
+    firebase_credentials_path: str
+    firebase_project_id: str
+    idempotency_collection: str
 
     # novo
     ipi_strategy: str
@@ -51,7 +55,34 @@ def get_settings() -> Settings:
         permitir_envio=_get_bool("PERMITIR_ENVIO", False),
         log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         timeout_padrao=int(os.getenv("TIMEOUT_PADRAO", "30")),
+        idempotency_enabled=_get_bool("IDEMPOTENCY_ENABLED", True),
+        firebase_credentials_path=os.getenv("FIREBASE_CREDENTIALS_PATH", "").strip(),
+        firebase_project_id=os.getenv("FIREBASE_PROJECT_ID", "").strip(),
+        idempotency_collection=os.getenv("IDEMPOTENCY_COLLECTION", "pedidos_integrados").strip(),
 
         # opções: none | discount_compensation | force_zero_ipi
         ipi_strategy=os.getenv("IPI_STRATEGY", "discount_compensation").strip().lower(),
     )
+
+def validar_config(settings: Settings) -> None:
+    if not settings.wake_auth:
+        raise ValueError("WAKE_AUTH não configurado")
+
+    if not settings.sankhya_x_token:
+        raise ValueError("SANKHYA_X_TOKEN não configurado")
+
+    if not settings.sankhya_client_id:
+        raise ValueError("SANKHYA_CLIENT_ID não configurado")
+
+    if not settings.sankhya_client_secret:
+        raise ValueError("SANKHYA_CLIENT_SECRET não configurado")
+
+    if settings.idempotency_enabled:
+        if not settings.firebase_credentials_path:
+            raise ValueError("FIREBASE_CREDENTIALS_PATH não configurado")
+
+        if not settings.firebase_project_id:
+            raise ValueError("FIREBASE_PROJECT_ID não configurado")
+
+        if not settings.idempotency_collection:
+            raise ValueError("IDEMPOTENCY_COLLECTION não configurado")
