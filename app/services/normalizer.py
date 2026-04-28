@@ -25,7 +25,7 @@ TRANSPORTADORAS_CONFIG = [
         "match_contem": ["correios"],
     },
     {
-        "codigo": 3090,
+        "codigo": 3060,
         "match_exato": ["mercado livre"],
     },
 ]
@@ -665,7 +665,7 @@ def normalizar_pedido_wake(
             "endereco": {
                 "logradouro": endereco.get("logradouro") or endereco.get("endereco") or "",
                 "numero": endereco.get("numero", ""),
-                "complemento": endereco.get("complemento", ""),
+                "complemento": str(endereco.get("complemento") or "")[:30],
                 "bairro": endereco.get("bairro", ""),
                 "cidade": endereco.get("cidade", ""),
                 "uf": endereco.get("estado", ""),
