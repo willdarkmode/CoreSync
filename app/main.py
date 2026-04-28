@@ -40,24 +40,7 @@ def main():
             client_secret=settings.sankhya_client_secret,
             timeout=settings.timeout_padrao,
         )
-
-        access_token = sankhya_client.get_access_token()
-
-        fiscal_client = FiscalClient(
-            base_url=settings.sankhya_base_url,
-            auth_token=access_token,
-            timeout=settings.timeout_padrao,
-        )
-
-        ipi_service = IpiCompensationService(
-            fiscal_client=fiscal_client,
-            nota_modelo=settings.nota_modelo,
-            codigo_cliente_referencia=settings.codigo_cliente_fiscal_referencia,
-            codigo_empresa=settings.codigo_empresa,
-            unidade_padrao=settings.unidade_padrao,
-            logger=logger,
-        )
-
+    
         idempotency_service = None
         if settings.idempotency_enabled:
             idempotency_service = IdempotencyService(
@@ -83,6 +66,24 @@ def main():
         )
 
         numero_pedido = input("Digite o número do pedido Wake: ").strip()
+
+        access_token = sankhya_client.get_access_token()
+
+        fiscal_client = FiscalClient(
+            base_url=settings.sankhya_base_url,
+            auth_token=access_token,
+            timeout=settings.timeout_padrao,
+        )
+
+        ipi_service = IpiCompensationService(
+            fiscal_client=fiscal_client,
+            nota_modelo=settings.nota_modelo,
+            codigo_cliente_referencia=settings.codigo_cliente_fiscal_referencia,
+            codigo_empresa=settings.codigo_empresa,
+            unidade_padrao=settings.unidade_padrao,
+            logger=logger,
+        )
+
         logger.info("Buscando pedido na Wake: %s", numero_pedido)
 
         pedido_wake = wake_client.buscar_pedido(numero_pedido)
