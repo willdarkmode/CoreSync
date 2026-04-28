@@ -3,7 +3,6 @@ import json
 from app.config import get_settings, validar_config
 from app.logger import setup_logger
 from app.validators import (
-    validar_config,
     validar_pedido_wake_bruto,
     validar_pedido_normalizado,
 )
@@ -27,7 +26,6 @@ def main():
     cnpj_service = CnpjService(timeout=settings.timeout_padrao)
 
     try:
-        validar_config(settings)
 
         wake_client = WakeClient(
             base_url=settings.wake_base_url,
@@ -154,6 +152,16 @@ def main():
 
         print("\nResposta Sankhya:")
         print(json.dumps(resposta, indent=2, ensure_ascii=False))
+
+        logger.info("Atualizando status do pedido na Wake para Separado...")
+
+        resposta_status_wake = wake_client.atualizar_status_se_pago(
+            numero_pedido=numero_pedido
+        )
+
+        if resposta_status_wake:
+            print("\nResultado atualização status Wake:")
+            print(json.dumps(resposta_status_wake, indent=2, ensure_ascii=False))
 
     except IntegracaoError as exc:
         logger.error("Erro de integração: %s", exc)

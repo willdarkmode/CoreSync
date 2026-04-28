@@ -1,24 +1,6 @@
 from app.exceptions import ValidacaoError
 
 
-def validar_config(settings) -> None:
-    faltantes = []
-
-    if not settings.wake_auth:
-        faltantes.append("WAKE_AUTH")
-    if not settings.sankhya_x_token:
-        faltantes.append("SANKHYA_X_TOKEN")
-    if not settings.sankhya_client_id:
-        faltantes.append("SANKHYA_CLIENT_ID")
-    if not settings.sankhya_client_secret:
-        faltantes.append("SANKHYA_CLIENT_SECRET")
-
-    if faltantes:
-        raise ValidacaoError(
-            "Variáveis obrigatórias ausentes: " + ", ".join(faltantes)
-        )
-
-
 def validar_pedido_wake_bruto(pedido: dict) -> None:
     erros = []
 
