@@ -1,5 +1,6 @@
 import re
 import requests
+import unicodedata
 from app.exceptions import IbgeLookupError
 from app.utils import normalizar_texto
 
@@ -9,8 +10,15 @@ class IbgeService:
         self.timeout = timeout
         self._cache: dict[tuple[str, str], int] = {}
 
+    def remover_acentos(self, texto: str) -> str:
+        return "".join(
+            c for c in unicodedata.normalize("NFD", texto)
+            if unicodedata.category(c) != "Mn"
+        )    
+
     def _normalizar_cidade_ibge(self, cidade: str) -> str:
         cidade = normalizar_texto(cidade)
+        cidade = self.remover_acentos(cidade)
         cidade = re.sub(r"[^a-z0-9]+", " ", cidade)
         cidade = re.sub(r"\s+", " ", cidade).strip()
         return cidade

@@ -41,6 +41,16 @@ class PayloadBuilder:
         uf = pedido_norm["cliente"]["endereco"]["uf"]
         codigo_ibge = self.ibge_service.obter_codigo_ibge(cidade, uf)
 
+        tipo = pedido_norm["cliente"]["tipo"]
+        ie = (pedido_norm["cliente"].get("ieRg") or "").strip()
+
+        if tipo == "PF":
+            cod_tip_parc = "10500000"
+        elif tipo == "PJ" and not ie:
+            cod_tip_parc = "10300000"
+        else:
+            cod_tip_parc = "10200000"
+        
         itens_payload = []
         for item in pedido_norm["itens"]:
             item_payload = {
@@ -83,7 +93,7 @@ class PayloadBuilder:
                 "telefoneDdd": pedido_norm["cliente"]["telefoneDdd"],
                 "CODVEND": "28",
                 "CODASSESSOR": "33",
-                "CODTIPPARC": "10500000" if pedido_norm["cliente"]["tipo"] == "PF" else "10200000",
+                "CODTIPPARC": cod_tip_parc,
                 "AD_SEGMENTO": "11",
                 "AD_ECOMMERCE": "S",
                 "CLIENTE": "S",
