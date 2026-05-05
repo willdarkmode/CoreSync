@@ -660,7 +660,7 @@ def normalizar_pedido_wake(
             logger=logger,
         ),
         "cliente": {
-            "atualizar": True,
+            "atualizar": False,
             "tipo": obter_tipo_cliente(usuario),
             "endereco": {
                 "logradouro": endereco.get("logradouro") or endereco.get("endereco") or "",

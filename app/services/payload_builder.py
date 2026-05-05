@@ -44,12 +44,17 @@ class PayloadBuilder:
         tipo = pedido_norm["cliente"]["tipo"]
         ie = (pedido_norm["cliente"].get("ieRg") or "").strip()
 
+        pj_sem_ie = tipo == "PJ" and (not ie or ie.upper() == "ISENTO")
+
         if tipo == "PF":
             cod_tip_parc = "10500000"
-        elif tipo == "PJ" and not ie:
+            ie_payload = ie
+        elif pj_sem_ie:
             cod_tip_parc = "10300000"
+            ie_payload = ""
         else:
             cod_tip_parc = "10200000"
+            ie_payload = ie
         
         itens_payload = []
         for item in pedido_norm["itens"]:
@@ -86,7 +91,7 @@ class PayloadBuilder:
                     "cep": pedido_norm["cliente"]["endereco"]["cep"],
                 },
                 "cnpjCpf": pedido_norm["cliente"]["cnpjCpf"],
-                "ieRg": pedido_norm["cliente"]["ieRg"],
+                "ieRg": ie_payload,
                 "nome": pedido_norm["cliente"]["nome"],
                 "email": pedido_norm["cliente"]["email"],
                 "telefoneNumero": pedido_norm["cliente"]["telefoneNumero"],
