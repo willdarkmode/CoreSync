@@ -49,12 +49,15 @@ class PayloadBuilder:
         if tipo == "PF":
             cod_tip_parc = "10500000"
             ie_payload = ie
+            classificms = "C"
         elif pj_sem_ie:
             cod_tip_parc = "10300000"
             ie_payload = ""
+            classificms = "C"
         else:
             cod_tip_parc = "10200000"
             ie_payload = ie
+            classificms = "R"
         
         itens_payload = []
         for item in pedido_norm["itens"]:
@@ -99,6 +102,7 @@ class PayloadBuilder:
                 "CODVEND": "28",
                 "CODASSESSOR": "33",
                 "CODTIPPARC": cod_tip_parc,
+                "CLASSIFICMS": classificms,
                 "AD_SEGMENTO": "11",
                 "AD_ECOMMERCE": "S",
                 "CLIENTE": "S",

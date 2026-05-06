@@ -122,3 +122,138 @@ class SankhyaClient:
 
         except requests.RequestException as exc:
             raise SankhyaAPIError(f"Falha ao enviar pedido para Sankhya: {exc}") from exc
+        
+    def buscar_codparc_por_pedido(self, codigo_pedido: str):
+        bearer_token = self.obter_bearer_token()
+
+        url = (
+            f"{self.base_url}"
+            "/gateway/v1/mge/service.sbr"
+            "?serviceName=CRUDServiceProvider.loadRecords&outputType=json"
+        )
+
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "Authorization": f"Bearer {bearer_token}",
+        }
+
+        payload = {
+            "serviceName": "CRUDServiceProvider.loadRecords",
+            "requestBody": {
+                "dataSet": {
+                    "rootEntity": "CabecalhoNota",
+                    "includePresentationFields": "N",
+                    "offsetPage": "0",
+                    "criteria": {
+                        "expression": {
+                            "$": "NUNOTA = ?"
+                        },
+                        "parameter": [
+                            {
+                                "$": str(codigo_pedido),
+                                "type": "I"
+                            }
+                        ]
+                    },
+                    "entity": {
+                        "fieldset": {
+                            "list": "NUNOTA,CODPARC"
+                        }
+                    }
+                }
+            }
+        }
+
+        response = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=self.timeout,
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise SankhyaAPIError(
+                f"Erro ao buscar CODPARC pelo pedido {codigo_pedido}: "
+                f"status={response.status_code} body={response.text}"
+            ) from exc
+
+        dados = response.json()
+
+        try:
+            entity = dados["responseBody"]["entities"]["entity"]
+
+            if isinstance(entity, dict):
+                return int(entity["f1"]["$"])
+
+            if isinstance(entity, list) and entity:
+                return int(entity[0]["f1"]["$"])
+
+        except Exception:
+            raise SankhyaAPIError(
+                f"Não foi possível extrair CODPARC da resposta do pedido {codigo_pedido}: {dados}"
+            )
+
+        return None   
+
+    def atualizar_classificms_cliente(self, codparc: int, classificms: str) -> dict:
+        bearer_token = self.obter_bearer_token()
+
+        url = (
+            f"{self.base_url}"
+            "/gateway/v1/mge/service.sbr"
+            "?serviceName=DatasetSP.save&outputType=json"
+        )
+
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "Authorization": f"Bearer {bearer_token}",
+        }
+
+        payload = {
+            "serviceName": "DatasetSP.save",
+            "requestBody": {
+                "entityName": "Parceiro",
+                "standAlone": False,
+                "fields": [
+                    "CODPARC",
+                    "CLASSIFICMS",
+                ],
+                "records": [
+                    {
+                        "pk": {
+                            "CODPARC": str(codparc)
+                        },
+                        "values": {
+                            "1": classificms
+                        }
+                    }
+                ]
+            }
+        }
+
+        response = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=self.timeout,
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise SankhyaAPIError(
+                f"Erro ao atualizar CLASSIFICMS do parceiro {codparc}: "
+                f"status={response.status_code} body={response.text}"
+            ) from exc
+
+        try:
+            return response.json()
+        except Exception:
+            return {
+                "status_code": response.status_code,
+                "response_text": response.text,
+            }  

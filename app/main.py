@@ -137,6 +137,13 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
         logger.info("Enviando pedido para Sankhya...")
         resposta = sankhya_client.incluir_pedido(payload)
 
+        corrigir_classificms_cliente_sankhya(
+            sankhya_client=sankhya_client,
+            payload=payload,
+            resposta=resposta,
+            logger=logger,
+        )
+
     except Exception as exc:
         if idempotency_service:
             idempotency_service.marcar_falha(numero_pedido, exc)
@@ -158,6 +165,77 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
         print("\nResultado atualização status Wake:")
         print(json.dumps(resposta_status_wake, indent=2, ensure_ascii=False))
 
+def corrigir_classificms_cliente_sankhya(
+    sankhya_client,
+    payload: dict,
+    resposta: dict,
+    logger,
+):
+    try:
+        cliente_payload = payload.get("cliente", {})
+
+        tipo = cliente_payload.get("tipo")
+        ie = (cliente_payload.get("ieRg") or "").strip()
+        classificms = cliente_payload.get("CLASSIFICMS")
+
+        deve_corrigir = (
+            tipo == "PJ"
+            and ie
+            and ie.upper() != "ISENTO"
+            and classificms == "R"
+        )
+
+        if not deve_corrigir:
+            return
+
+        codigo_pedido = (
+            resposta.get("retorno", {}).get("codigoPedido")
+            or resposta.get("codigoPedido")
+            or resposta.get("codigo")
+        )
+
+        if not codigo_pedido:
+            logger.warning(
+                "Não foi possível corrigir CLASSIFICMS: codigoPedido não encontrado. Resposta=%s",
+                resposta,
+            )
+            return
+
+        logger.info(
+            "Buscando CODPARC pelo pedido Sankhya %s...",
+            codigo_pedido,
+        )
+
+        codparc = sankhya_client.buscar_codparc_por_pedido(codigo_pedido)
+
+        if not codparc:
+            logger.warning(
+                "Não foi possível corrigir CLASSIFICMS: CODPARC não encontrado para o pedido %s.",
+                codigo_pedido,
+            )
+            return
+
+        logger.info(
+            "Atualizando CLASSIFICMS do parceiro %s para %s",
+            codparc,
+            classificms,
+        )
+
+        retorno = sankhya_client.atualizar_classificms_cliente(
+            codparc=codparc,
+            classificms=classificms,
+        )
+
+        logger.info(
+            "CLASSIFICMS atualizado com sucesso. Retorno=%s",
+            retorno,
+        )
+
+    except Exception as exc:
+        logger.exception(
+            "Erro ao corrigir CLASSIFICMS do parceiro: %s",
+            exc,
+        )
 
 def main():
     settings = get_settings()
