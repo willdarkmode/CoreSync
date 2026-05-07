@@ -1,4 +1,5 @@
 import requests
+import time
 from app.exceptions import SankhyaAuthError, SankhyaAPIError
 
 
@@ -21,40 +22,10 @@ class SankhyaClient:
         self._access_token_expires_at = None     
 
     def obter_bearer_token(self) -> str:
-        url = f"{self.base_url}/authenticate"
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "X-Token": self.x_token,
-        }
-        data = {
-            "grant_type": "client_credentials",
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
-        }
-
-        try:
-            response = requests.post(url, headers=headers, data=data, timeout=self.timeout)
-            response.raise_for_status()
-            dados = response.json()
-
-            bearer_token = (
-                dados.get("access_token")
-                or dados.get("bearerToken")
-                or dados.get("token")
-            )
-
-            if not bearer_token:
-                raise SankhyaAuthError(f"Token não encontrado na resposta: {dados}")
-
-            return bearer_token
-
-        except requests.RequestException as exc:
-            raise SankhyaAuthError(f"Falha na autenticação Sankhya: {exc}") from exc
+        return self.get_access_token()
 
     def get_access_token(self) -> str:
-        import time
-        import requests
-
+        
         if self._access_token and self._access_token_expires_at:
             if time.time() < self._access_token_expires_at:
                 return self._access_token
@@ -72,24 +43,36 @@ class SankhyaClient:
             "X-Token": self.x_token,
         }
 
-        response = requests.post(
-            url,
-            data=payload,
-            headers=headers,
-            timeout=self.timeout,
+        try:
+            response = requests.post(
+                url,
+                data=payload,
+                headers=headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException as exc:
+            raise SankhyaAuthError(f"Falha ao autenticar no Sankhya: {exc}") from exc
+        except ValueError as exc:
+            raise SankhyaAuthError("Resposta de autenticação não é um JSON válido") from exc
+
+        access_token = (
+            data.get("access_token")
+            or data.get("bearerToken")
+            or data.get("token")
         )
-        response.raise_for_status()
-
-        data = response.json()
-
-        access_token = data.get("access_token")
-        expires_in = data.get("expires_in", 3600)
 
         if not access_token:
-            raise ValueError(f"Resposta de autenticação sem access_token: {data}")
+            raise SankhyaAuthError(f"Resposta de autenticação sem access_token: {data}")
+
+        try:
+            expires_in = int(data.get("expires_in") or 3600)
+        except (TypeError, ValueError):
+            expires_in = 3600
 
         self._access_token = access_token
-        self._access_token_expires_at = time.time() + int(expires_in) - 60
+        self._access_token_expires_at = time.time() + expires_in - 60
 
         return self._access_token
 
