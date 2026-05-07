@@ -257,3 +257,84 @@ class SankhyaClient:
                 "status_code": response.status_code,
                 "response_text": response.text,
             }  
+        
+    def _validar_retorno_datasetsp_save(self, retorno: dict, contexto: str) -> None:
+        if str(retorno.get("status")) != "1":
+            raise SankhyaAPIError(
+                f"DatasetSP.save não confirmou a gravação de {contexto}. "
+                f"Retorno={retorno}"
+            )        
+        
+    def vincular_icms_por_empresa(
+        self,
+        codparc: int,
+        empresas: list[tuple[str, str, str]] | None = None,
+    ) -> dict:
+        if empresas is None:
+            empresas = [
+                ("1", "1", "0"),
+                ("2", "1", "0"),
+            ]
+
+        bearer_token = self.obter_bearer_token()
+
+        url = (
+            f"{self.base_url}"
+            "/gateway/v1/mge/service.sbr"
+            "?serviceName=DatasetSP.save&outputType=json"
+        )
+
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "Authorization": f"Bearer {bearer_token}",
+        }
+
+        records = [
+            {
+                "values": {
+                    "0": str(codparc),
+                    "1": str(codemp),
+                    "2": str(codtab),
+                }
+            }
+            for codemp, _, codtab in empresas
+        ]
+
+        payload = {
+            "serviceName": "DatasetSP.save",
+            "requestBody": {
+                "entityName": "ParceiroEmpresGrupoIcms",
+                "standAlone": False,
+                "fields": [
+                    "CODPARC",
+                    "CODEMP",
+                    "CODTAB",
+                ],
+                "records": records,
+            },
+        }
+
+        response = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=self.timeout,
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise SankhyaAPIError(
+                f"Erro HTTP ao vincular ICMS por empresa do parceiro {codparc}: "
+                f"status={response.status_code} body={response.text}"
+            ) from exc
+
+        retorno = response.json()
+
+        self._validar_retorno_datasetsp_save(
+            retorno,
+            contexto=f"vínculo ICMS por empresa do parceiro {codparc}",
+        )
+
+        return retorno
