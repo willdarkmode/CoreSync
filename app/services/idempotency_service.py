@@ -71,14 +71,27 @@ class IdempotencyService:
 
         _reservar(transaction)
 
-    def marcar_sucesso(self, numero_pedido: str, resposta: dict) -> None:
-        self.db.collection(self.collection).document(str(numero_pedido)).set({
+    def marcar_sucesso(
+        self,
+        numero_pedido: str,
+        resposta: dict,
+        resumo: dict | None = None,
+    ) -> None:
+        dados = {
             "status": "SUCCESS",
             "sankhya_response": resposta,
             "updated_at": datetime.now(timezone.utc),
             "machine_id": self.machine_id,
             "erro": None,
-        }, merge=True)
+        }
+
+        if resumo:
+            dados["resumo"] = resumo
+
+        self.db.collection(self.collection).document(str(numero_pedido)).set(
+            dados,
+            merge=True,
+        )
 
     def marcar_falha(self, numero_pedido: str, erro: Exception) -> None:
         self.db.collection(self.collection).document(str(numero_pedido)).set({

@@ -258,12 +258,27 @@ class SankhyaClient:
                 "response_text": response.text,
             }  
         
-    def _validar_retorno_datasetsp_save(self, retorno: dict, contexto: str) -> None:
-        if str(retorno.get("status")) != "1":
-            raise SankhyaAPIError(
-                f"DatasetSP.save não confirmou a gravação de {contexto}. "
-                f"Retorno={retorno}"
-            )        
+    def _validar_retorno_datasetsp_save(
+        self,
+        retorno: dict,
+        contexto: str,
+        aceitar_registro_ja_existente: bool = False,
+    ) -> None:
+        if str(retorno.get("status")) == "1":
+            return
+
+        status_message = retorno.get("statusMessage") or ""
+
+        if (
+            aceitar_registro_ja_existente
+            and "restrição exclusiva" in status_message.lower()
+        ):
+            return
+
+        raise SankhyaAPIError(
+            f"DatasetSP.save não confirmou a gravação de {contexto}. "
+            f"Retorno={retorno}"
+        )       
         
     def vincular_icms_por_empresa(
         self,
@@ -335,6 +350,7 @@ class SankhyaClient:
         self._validar_retorno_datasetsp_save(
             retorno,
             contexto=f"vínculo ICMS por empresa do parceiro {codparc}",
+            aceitar_registro_ja_existente=True,
         )
 
         return retorno

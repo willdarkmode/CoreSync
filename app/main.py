@@ -18,6 +18,63 @@ from app.mappers import ProdutoMapper, PagamentoMapper
 from app.exceptions import IntegracaoError
 from app.services.idempotency_service import IdempotencyService
 
+def imprimir_resumo_payload(payload: dict) -> None:
+    cliente = payload.get("cliente", {})
+    itens = payload.get("itens", [])
+    financeiros = payload.get("financeiros", [])
+
+    print("\nResumo do pedido:")
+    print(f"Cliente: {cliente.get('nome') or cliente.get('razao')}")
+    print(f"Documento: {cliente.get('cnpjCpf')}")
+    print(f"Tipo cliente: {cliente.get('tipo')}")
+    print(f"Valor total: R$ {payload.get('valorTotal')}")
+    print(f"Itens: {len(itens)}")
+    print(f"Parcelas: {len(financeiros)}")
+    print(f"Vendedor: {payload.get('codigoVendedor')}")
+    print(f"Previsão entrega: {payload.get('AD_PREVENT')}")
+
+    if itens:
+        print("\nProdutos:")
+
+        for item in itens:
+            codigo = item.get("codigoProduto")
+            quantidade = item.get("quantidade")
+            valor = item.get("valorUnitario")
+
+            print(
+                f" - SKU {codigo} | Qtd {quantidade} | Unit R$ {valor}"
+            )
+
+def montar_resumo_firebase(
+    payload: dict,
+    numero_pedido_wake: str,
+    codigo_pedido_sankhya: str | None = None,
+) -> dict:
+    cliente = payload.get("cliente", {})
+    itens = payload.get("itens", [])
+    financeiros = payload.get("financeiros", [])
+
+    return {
+        "pedidoWake": str(numero_pedido_wake),
+        "pedidoSankhya": str(codigo_pedido_sankhya) if codigo_pedido_sankhya else None,
+        "cliente": cliente.get("nome") or cliente.get("razao"),
+        "documento": cliente.get("cnpjCpf"),
+        "tipoCliente": cliente.get("tipo"),
+        "valorTotal": payload.get("valorTotal"),
+        "quantidadeItens": len(itens),
+        "quantidadeParcelas": len(financeiros),
+        "vendedor": payload.get("codigoVendedor"),
+        "previsaoEntrega": payload.get("AD_PREVENT"),
+        "produtos": [
+            {
+                "sku": item.get("codigoProduto"),
+                "quantidade": item.get("quantidade"),
+                "valorUnitario": item.get("valorUnitario"),
+            }
+            for item in itens
+        ],
+        "classificms": cliente.get("CLASSIFICMS"),
+    }
 
 def processar_pedido(numero_pedido: str, settings, logger) -> None:
     cnpj_service = CnpjService(timeout=settings.timeout_padrao)
@@ -117,11 +174,22 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
         pedido_normalizado
     )
 
-    print("\nPayload final:")
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    imprimir_resumo_payload(payload)
 
-    confirmar = input("\nEnviar para o Sankhya? (s/n): ").strip().lower()
-    if confirmar != "s":
+    while True:
+        confirmar = input(
+            "\nEnviar para o Sankhya? "
+            "(s = sim / n = não / d = detalhes): "
+        ).strip().lower()
+
+        if confirmar == "d":
+            print("\nPayload completo:")
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            continue
+
+        if confirmar == "s":
+            break
+
         print("Envio cancelado pelo usuário.")
         return
 
@@ -149,11 +217,28 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
             idempotency_service.marcar_falha(numero_pedido, exc)
         raise
 
-    if idempotency_service:
-        idempotency_service.marcar_sucesso(numero_pedido, resposta)
+    codigo_pedido_sankhya = (
+        resposta.get("retorno", {}).get("codigoPedido")
+        or resposta.get("codigo")
+    )
 
-    print("\nResposta Sankhya:")
-    print(json.dumps(resposta, indent=2, ensure_ascii=False))
+    resumo_firebase = montar_resumo_firebase(
+        payload=payload,
+        numero_pedido_wake=str(numero_pedido),
+        codigo_pedido_sankhya=codigo_pedido_sankhya,
+    )
+
+    if idempotency_service:
+        idempotency_service.marcar_sucesso(
+            numero_pedido=numero_pedido,
+            resposta=resposta,
+            resumo=resumo_firebase,
+        )
+
+    print("\nPedido enviado para o Sankhya com sucesso.")
+
+    if codigo_pedido_sankhya:
+        print(f"Pedido Sankhya: {codigo_pedido_sankhya}")
 
     logger.info("Atualizando status do pedido na Wake para Separado...")
 
@@ -161,9 +246,23 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
         numero_pedido=numero_pedido
     )
 
-    if resposta_status_wake:
-        print("\nResultado atualização status Wake:")
-        print(json.dumps(resposta_status_wake, indent=2, ensure_ascii=False))
+    print("\nWake:")
+
+    if isinstance(resposta_status_wake, dict):
+        mensagem_wake = resposta_status_wake.get(
+            "mensagem",
+            "Status Wake processado.",
+        )
+        print(mensagem_wake)
+
+    elif resposta_status_wake is True:
+        print("Status atualizado com sucesso.")
+
+    elif resposta_status_wake is False:
+        print("Status não foi atualizado.")
+
+    else:
+        print("Status Wake processado.")
 
 def corrigir_cadastro_cliente_sankhya(
     sankhya_client,
@@ -201,11 +300,11 @@ def corrigir_cadastro_cliente_sankhya(
             codparc,
         )
 
-        retorno_empresas = sankhya_client.vincular_icms_por_empresa(codparc=codparc)
+        sankhya_client.vincular_icms_por_empresa(codparc=codparc)
 
         logger.info(
-            "Empresas do parceiro atualizadas com sucesso. Retorno=%s",
-            retorno_empresas,
+            "Empresas 1 e 2 vinculadas ao parceiro %s com CODTAB 0",
+            codparc,
         )
 
         cliente_payload = payload.get("cliente", {})
@@ -230,14 +329,15 @@ def corrigir_cadastro_cliente_sankhya(
             classificms,
         )
 
-        retorno_classificms = sankhya_client.atualizar_classificms_cliente(
+        sankhya_client.atualizar_classificms_cliente(
             codparc=codparc,
             classificms=classificms,
         )
 
         logger.info(
-            "CLASSIFICMS atualizado com sucesso. Retorno=%s",
-            retorno_classificms,
+            "CLASSIFICMS do parceiro %s atualizado para %s",
+            codparc,
+            classificms,
         )
 
     except Exception as exc:
