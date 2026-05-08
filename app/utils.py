@@ -62,7 +62,7 @@ def parse_datetime_iso_flex(value: str) -> datetime:
 
 def formatar_data_hora_br(data_iso: str) -> tuple[str, str]:
     dt = parse_datetime_iso_flex(data_iso)
-    return dt.strftime("%d/%m/%Y"), dt.strftime("%H:%M")
+    return dt.strftime("%d/%m/%Y"), dt.strftime("%H:%M:%S")
 
 
 def safe_float(valor, default: float = 0.0) -> float:

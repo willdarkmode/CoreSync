@@ -22,11 +22,16 @@ TRANSPORTADORAS_CONFIG = [
     {
         "codigo": 2994,
         "match_exato": ["pac", "sedex"],
-        "match_contem": ["correios"],
+        "match_contem": ["correios", "magalu"],
     },
     {
         "codigo": 3060,
         "match_exato": ["mercado livre"],
+    },
+    {
+        "codigo": 11263,
+        "match_exato": ["shopee xpress"],
+        "match_contem": ["shopee"],
     },
 ]
 
