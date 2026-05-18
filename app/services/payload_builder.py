@@ -41,6 +41,9 @@ class PayloadBuilder:
         uf = pedido_norm["cliente"]["endereco"]["uf"]
         codigo_ibge = self.ibge_service.obter_codigo_ibge(cidade, uf)
 
+        is_fulfillment = bool(pedido_norm.get("fulfillment"))
+        nota_modelo = 110925 if is_fulfillment else self.nota_modelo
+
         tipo = pedido_norm["cliente"]["tipo"]
         ie = (pedido_norm["cliente"].get("ieRg") or "").strip()
 
@@ -109,7 +112,7 @@ class PayloadBuilder:
                 "FORNECEDOR": "S",
                 "TRANSPORTADORA": "S",
             },
-            "notaModelo": self.nota_modelo,
+            "notaModelo": nota_modelo,
             "data": pedido_norm["data"],
             "hora": pedido_norm["hora"],
             "codigoVendedor": self.codigo_vendedor,

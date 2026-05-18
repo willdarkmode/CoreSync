@@ -70,6 +70,20 @@ def obter_tipo_cliente(usuario: dict) -> str:
     tipo = (usuario.get("tipoPessoa") or "").strip().lower()
     return "PF" if tipo == "fisica" else "PJ"
 
+def pedido_eh_fulfillment(obj) -> bool:
+    if isinstance(obj, dict):
+        chave = str(obj.get("chave") or "").strip().lower()
+        valor = str(obj.get("valor") or "").strip().lower()
+
+        if chave == "fulfillment" and valor in {"true", "1", "sim", "s", "yes"}:
+            return True
+
+        return any(pedido_eh_fulfillment(v) for v in obj.values())
+
+    if isinstance(obj, list):
+        return any(pedido_eh_fulfillment(item) for item in obj)
+
+    return False
 
 def enriquecer_ie_cliente(cliente: dict, cnpj_service=None, logger=None) -> dict:
     tipo = cliente.get("tipo")
@@ -602,6 +616,15 @@ def normalizar_pedido_wake(
     endereco = obter_endereco_entrega(pedido_wake)
     telefone = obter_telefone_usuario(usuario)
     ddd, numero_tel = quebrar_telefone(telefone)
+    is_fulfillment = pedido_eh_fulfillment(pedido_wake)
+    codigo_local_item = 600000 if is_fulfillment else codigo_local_estoque
+
+    if logger:
+        logger.info(
+            "FULL Mercado Livre detectado? %s | CODLOCAL=%s",
+            is_fulfillment,
+            codigo_local_item,
+        )
 
     itens_norm = []
 
@@ -617,7 +640,7 @@ def normalizar_pedido_wake(
             "codigoProduto": produto_mapper.sku_wake_para_codigo_sankhya(sku),
             "quantidade": safe_float(item.get("quantidade", 0), 0.0),
             "controle": "",
-            "codigoLocalEstoque": codigo_local_estoque,
+            "codigoLocalEstoque": codigo_local_item,
             "valorUnitario": calcular_valor_unitario_final(item),
             "skuOriginal": sku,
             "nomeProduto": item.get("nome", ""),
@@ -651,6 +674,7 @@ def normalizar_pedido_wake(
     pedido = {
         "pedidoId": pedido_wake.get("pedidoId"),
         "identificador": pedido_wake.get("identificador"),
+        "fulfillment": is_fulfillment,
         "data": data_fmt,
         "hora": hora_fmt,
         "valorTotal": valor_total,
