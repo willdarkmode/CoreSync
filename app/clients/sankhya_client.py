@@ -239,7 +239,76 @@ class SankhyaClient:
             return {
                 "status_code": response.status_code,
                 "response_text": response.text,
-            }  
+            }
+        
+    def atualizar_endereco_cliente(
+        self,
+        codparc: int,
+        endereco: dict,
+    ) -> dict:
+        bearer_token = self.obter_bearer_token()
+
+        url = (
+            f"{self.base_url}"
+            "/gateway/v1/mge/service.sbr"
+            "?serviceName=DatasetSP.save&outputType=json"
+        )
+
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "Authorization": f"Bearer {bearer_token}",
+        }
+
+        payload = {
+            "serviceName": "DatasetSP.save",
+            "requestBody": {
+                "entityName": "Parceiro",
+                "standAlone": False,
+                "fields": [
+                    "CODPARC",
+                    "CEP",
+                    "NUMEND",
+                    "COMPLEMENTO",
+                ],
+                "records": [
+                    {
+                        "pk": {
+                            "CODPARC": str(codparc),
+                        },
+                        "values": {
+                            "1": str(endereco.get("cep", "") or ""),
+                            "2": str(endereco.get("numero", "") or ""),
+                            "3": str(endereco.get("complemento", "") or ""),
+                        },
+                    }
+                ],
+            },
+        }
+
+        response = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=self.timeout,
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise SankhyaAPIError(
+                f"Erro ao atualizar endereço do parceiro {codparc}: "
+                f"status={response.status_code} body={response.text}"
+            ) from exc
+
+        retorno = response.json()
+
+        self._validar_retorno_datasetsp_save(
+            retorno,
+            contexto=f"endereço do parceiro {codparc}",
+        )
+
+        return retorno
         
     def _validar_retorno_datasetsp_save(
         self,

@@ -308,36 +308,30 @@ def corrigir_cadastro_cliente_sankhya(
         )
 
         cliente_payload = payload.get("cliente", {})
+        endereco_payload = cliente_payload.get("endereco", {})
 
-        tipo = cliente_payload.get("tipo")
-        ie = (cliente_payload.get("ieRg") or "").strip()
-        classificms = cliente_payload.get("CLASSIFICMS")
+        logger.info("Atualizando endereço do parceiro %s.", codparc)
 
-        deve_corrigir_classificms = (
-            tipo == "PJ"
-            and ie
-            and ie.upper() != "ISENTO"
-            and classificms == "R"
+        sankhya_client.atualizar_endereco_cliente(
+            codparc=codparc,
+            endereco=endereco_payload,
         )
 
-        if not deve_corrigir_classificms:
-            return
+        logger.info("Endereço do parceiro %s atualizado com sucesso.", codparc)
 
         logger.info(
-            "Atualizando CLASSIFICMS do parceiro %s para %s",
+            "Atualizando CLASSIFICMS do parceiro %s para C.",
             codparc,
-            classificms,
         )
 
         sankhya_client.atualizar_classificms_cliente(
             codparc=codparc,
-            classificms=classificms,
+            classificms="C",
         )
 
         logger.info(
-            "CLASSIFICMS do parceiro %s atualizado para %s",
+            "CLASSIFICMS do parceiro %s atualizado para C.",
             codparc,
-            classificms,
         )
 
     except Exception as exc:
