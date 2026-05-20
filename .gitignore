@@ -1,5 +1,4 @@
 .env
 .env.*
 firebase/
-__pycache__/
-*.pyc
+**/__pycache__/
