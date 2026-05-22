@@ -47,7 +47,7 @@ class CnpjService:
         if isinstance(inscricoes, list) and inscricoes:
             ativa = next((i for i in inscricoes if i.get("ativo") is True), None)
             if ativa:
-                ie = (ativa.get("inscricao_estadual") or "").strip().upper()
+                ie = somente_digitos(ativa.get("inscricao_estadual") or "")
 
         resultado = {
             "razao_social": data.get("razao_social"),

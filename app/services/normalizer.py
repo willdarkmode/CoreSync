@@ -88,26 +88,40 @@ def pedido_eh_fulfillment(obj) -> bool:
 def enriquecer_ie_cliente(cliente: dict, cnpj_service=None, logger=None) -> dict:
     tipo = cliente.get("tipo")
     cnpj_cpf = cliente.get("cnpjCpf", "")
-    ie_atual = (cliente.get("ieRg") or "").strip()
+    ie_wake = somente_digitos(cliente.get("ieRg") or "")
+
+    cliente["ieRg"] = ie_wake
 
     if tipo != "PJ":
         return cliente
-    if ie_atual:
-        return cliente
+
     if not cnpj_service:
         return cliente
 
     try:
         dados = cnpj_service.buscar_dados_cnpj(cnpj_cpf)
-        if dados and dados.get("inscricao_estadual"):
-            cliente["ieRg"] = dados["inscricao_estadual"]
+        ie_cnpj = somente_digitos((dados or {}).get("inscricao_estadual") or "")
+
+        if ie_cnpj:
+            if ie_wake and ie_wake != ie_cnpj and logger:
+                logger.warning(
+                    "IE divergente para CNPJ %s: Wake='%s' | CNPJ.ws='%s'. Usando CNPJ.ws.",
+                    cnpj_cpf,
+                    ie_wake,
+                    ie_cnpj,
+                )
+
+            cliente["ieRg"] = ie_cnpj
+
             if logger:
-                logger.info("IE enriquecida via CNPJ.ws para CNPJ %s", cnpj_cpf)
+                logger.info("IE definida via CNPJ.ws para CNPJ %s: %s", cnpj_cpf, ie_cnpj)
+
     except Exception as exc:
         if logger:
             logger.warning(
-                "Falha ao enriquecer IE via CNPJ.ws para CNPJ %s: %s",
+                "Falha ao consultar IE via CNPJ.ws para CNPJ %s. Mantendo IE Wake='%s'. Erro: %s",
                 cnpj_cpf,
+                ie_wake,
                 exc,
             )
 
