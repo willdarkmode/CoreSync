@@ -18,7 +18,7 @@ class CnpjService:
         self.cnpja_api_key = cnpja_api_key
         self._cache: dict[str, dict | None] = {}
 
-    def buscar_dados_cnpj(self, cnpj: str) -> dict | None:
+    def buscar_dados_cnpj(self, cnpj: str, uf: str | None = None) -> dict | None:
         cnpj_limpo = somente_digitos(cnpj)
 
         if not cnpj_limpo:
@@ -27,16 +27,19 @@ class CnpjService:
         if len(cnpj_limpo) != 14:
             raise CnpjLookupError(f"CNPJ inválido para consulta: {cnpj}")
 
-        if cnpj_limpo in self._cache:
-            return self._cache[cnpj_limpo]
+        uf_normalizada = (uf or "").strip().upper()
+        cache_key = f"{cnpj_limpo}:{uf_normalizada}"
 
-        resultado = self._buscar_cnpjws(cnpj_limpo)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        resultado = self._buscar_cnpjws(cnpj_limpo, uf_normalizada)
 
         if resultado and resultado.get("inscricao_estadual"):
-            self._cache[cnpj_limpo] = resultado
+            self._cache[cache_key] = resultado
             return resultado
 
-        resultado_fallback = self._buscar_cnpja(cnpj_limpo)
+        resultado_fallback = self._buscar_cnpja(cnpj_limpo, uf_normalizada)
 
         if resultado_fallback and resultado_fallback.get("inscricao_estadual"):
             if resultado:
@@ -45,10 +48,10 @@ class CnpjService:
             else:
                 resultado = resultado_fallback
 
-        self._cache[cnpj_limpo] = resultado
+        self._cache[cache_key] = resultado
         return resultado
 
-    def _buscar_cnpjws(self, cnpj_limpo: str) -> dict | None:
+    def _buscar_cnpjws(self, cnpj_limpo: str, uf: str | None = None) -> dict | None:
         url = f"https://publica.cnpj.ws/cnpj/{cnpj_limpo}"
 
         try:
@@ -67,9 +70,32 @@ class CnpjService:
         estabelecimento = data.get("estabelecimento", {}) or {}
         inscricoes = estabelecimento.get("inscricoes_estaduais") or []
 
+        uf = (uf or "").strip().upper()
         ie = ""
+
         if isinstance(inscricoes, list) and inscricoes:
-            ativa = next((i for i in inscricoes if i.get("ativo") is True), None)
+            if uf:
+                ativa = next(
+                    (
+                        i for i in inscricoes
+                        if (
+                            i.get("ativo") is True
+                            and (
+                                (i.get("estado", {}) or {}).get("sigla")
+                                or i.get("uf")
+                                or i.get("estado_sigla")
+                                or ""
+                            ).upper() == uf
+                        )
+                    ),
+                    None,
+                )
+            else:
+                ativa = next(
+                    (i for i in inscricoes if i.get("ativo") is True),
+                    None,
+                )
+
             if ativa:
                 ie = somente_digitos(ativa.get("inscricao_estadual") or "")
 
@@ -80,7 +106,7 @@ class CnpjService:
             "fonte_ie": "cnpjws" if ie else "",
         }
 
-    def _buscar_cnpja(self, cnpj_limpo: str) -> dict | None:
+    def _buscar_cnpja(self, cnpj_limpo: str, uf: str | None = None) -> dict | None:
         if not self.cnpja_api_key:
             return None
 
@@ -106,15 +132,30 @@ class CnpjService:
 
         inscricoes = data.get("registrations") or []
 
+        uf = (uf or "").strip().upper()
         ie = ""
-        if isinstance(inscricoes, list):
-            ativa = next(
-                (
-                    i for i in inscricoes
-                    if i.get("enabled") is True and i.get("number")
-                ),
-                None,
-            )
+
+        if isinstance(inscricoes, list) and inscricoes:
+            if uf:
+                ativa = next(
+                    (
+                        i for i in inscricoes
+                        if (
+                            i.get("enabled") is True
+                            and i.get("number")
+                            and (i.get("state") or "").upper() == uf
+                        )
+                    ),
+                    None,
+                )
+            else:
+                ativa = next(
+                    (
+                        i for i in inscricoes
+                        if i.get("enabled") is True and i.get("number")
+                    ),
+                    None,
+                )
 
             if ativa:
                 ie = somente_digitos(ativa.get("number") or "")

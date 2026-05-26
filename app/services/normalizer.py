@@ -2,6 +2,7 @@ from decimal import Decimal
 import re
 from datetime import timedelta
 
+from app.services import cnpj_service
 from app.utils import (
     somente_digitos,
     quebrar_telefone,
@@ -99,7 +100,8 @@ def enriquecer_ie_cliente(cliente: dict, cnpj_service=None, logger=None) -> dict
         return cliente
 
     try:
-        dados = cnpj_service.buscar_dados_cnpj(cnpj_cpf)
+        uf_cliente = (cliente.get("endereco", {}) or {}).get("uf")
+        dados = cnpj_service.buscar_dados_cnpj(cnpj_cpf, uf=uf_cliente)
         ie_cnpj = somente_digitos((dados or {}).get("inscricao_estadual") or "")
         fonte_ie = (dados or {}).get("fonte_ie") or "serviço de CNPJ"
 
