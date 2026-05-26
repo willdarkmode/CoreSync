@@ -77,7 +77,10 @@ def montar_resumo_firebase(
     }
 
 def processar_pedido(numero_pedido: str, settings, logger) -> None:
-    cnpj_service = CnpjService(timeout=settings.timeout_padrao)
+    cnpj_service = CnpjService(
+        timeout=settings.timeout_padrao,
+        cnpja_api_key=settings.cnpja_api_key,
+    )
 
     wake_client = WakeClient(
         base_url=settings.wake_base_url,

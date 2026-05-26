@@ -32,8 +32,7 @@ class Settings:
     firebase_credentials_path: str
     firebase_project_id: str
     idempotency_collection: str
-
-    # novo
+    cnpja_api_key: str
     ipi_strategy: str
 
 
@@ -59,8 +58,7 @@ def get_settings() -> Settings:
         firebase_credentials_path=os.getenv("FIREBASE_CREDENTIALS_PATH", "").strip(),
         firebase_project_id=os.getenv("FIREBASE_PROJECT_ID", "").strip(),
         idempotency_collection=os.getenv("IDEMPOTENCY_COLLECTION", "pedidos_integrados").strip(),
-
-        # opções: none | discount_compensation | force_zero_ipi
+        cnpja_api_key=os.getenv("CNPJA_API_KEY", "").strip(),
         ipi_strategy=os.getenv("IPI_STRATEGY", "discount_compensation").strip().lower(),
     )
 

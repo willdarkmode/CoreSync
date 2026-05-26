@@ -101,25 +101,33 @@ def enriquecer_ie_cliente(cliente: dict, cnpj_service=None, logger=None) -> dict
     try:
         dados = cnpj_service.buscar_dados_cnpj(cnpj_cpf)
         ie_cnpj = somente_digitos((dados or {}).get("inscricao_estadual") or "")
+        fonte_ie = (dados or {}).get("fonte_ie") or "serviço de CNPJ"
 
         if ie_cnpj:
             if ie_wake and ie_wake != ie_cnpj and logger:
                 logger.warning(
-                    "IE divergente para CNPJ %s: Wake='%s' | CNPJ.ws='%s'. Usando CNPJ.ws.",
+                    "IE divergente para CNPJ %s: Wake='%s' | %s='%s'. Usando %s.",
                     cnpj_cpf,
                     ie_wake,
+                    fonte_ie,
                     ie_cnpj,
+                    fonte_ie,
                 )
 
             cliente["ieRg"] = ie_cnpj
 
             if logger:
-                logger.info("IE definida via CNPJ.ws para CNPJ %s: %s", cnpj_cpf, ie_cnpj)
+                logger.info(
+                    "IE definida via %s para CNPJ %s: %s",
+                    fonte_ie,
+                    cnpj_cpf,
+                    ie_cnpj,
+                )
 
     except Exception as exc:
         if logger:
             logger.warning(
-                "Falha ao consultar IE via CNPJ.ws para CNPJ %s. Mantendo IE Wake='%s'. Erro: %s",
+                "Falha ao consultar IE via serviços de CNPJ para CNPJ %s. Mantendo IE Wake='%s'. Erro: %s",
                 cnpj_cpf,
                 ie_wake,
                 exc,
