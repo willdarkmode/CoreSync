@@ -37,9 +37,13 @@ class PayloadBuilder:
         return self.montar_com_pedido_normalizado(pedido_norm)
 
     def montar_com_pedido_normalizado(self, pedido_norm: dict) -> dict:
-        cidade = pedido_norm["cliente"]["endereco"]["cidade"]
-        uf = pedido_norm["cliente"]["endereco"]["uf"]
-        codigo_ibge = self.ibge_service.obter_codigo_ibge(cidade, uf)
+        endereco = pedido_norm["cliente"]["endereco"]
+
+        cidade = endereco["cidade"]
+        uf = endereco["uf"]
+        cep = endereco.get("cep")
+
+        codigo_ibge = self.ibge_service.obter_codigo_ibge(cidade, uf, cep)
 
         is_fulfillment = bool(pedido_norm.get("fulfillment"))
         nota_modelo = 110925 if is_fulfillment else self.nota_modelo
