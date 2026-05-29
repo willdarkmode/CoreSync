@@ -1,5 +1,6 @@
 import json
-
+from copy import deepcopy
+from datetime import datetime, timedelta
 from app.config import get_settings, validar_config
 from app.logger import setup_logger
 from app.validators import (
@@ -17,6 +18,111 @@ from app.services.normalizer import normalizar_pedido_wake
 from app.mappers import ProdutoMapper, PagamentoMapper
 from app.exceptions import IntegracaoError
 from app.services.idempotency_service import IdempotencyService
+
+MENSAGEM_COLISAO_DATA_HORA_SANKHYA = (
+    "Já existe um registro de venda com estes dados"
+)
+
+MAX_TENTATIVAS_AJUSTE_HORARIO = 5
+
+
+def erro_colisao_data_hora_sankhya(exc: Exception) -> bool:
+    return MENSAGEM_COLISAO_DATA_HORA_SANKHYA in str(exc)
+
+
+def deslocar_data_hora_payload(payload: dict, segundos: int) -> dict:
+    novo_payload = deepcopy(payload)
+
+    data = novo_payload.get("data")
+    hora = novo_payload.get("hora")
+
+    if not data or not hora:
+        return novo_payload
+
+    dt = datetime.strptime(
+        f"{data} {hora}",
+        "%d/%m/%Y %H:%M:%S",
+    )
+
+    dt = dt + timedelta(seconds=segundos)
+
+    novo_payload["data"] = dt.strftime("%d/%m/%Y")
+    novo_payload["hora"] = dt.strftime("%H:%M:%S")
+
+    observacao = novo_payload.get("AD_OBSFIN") or ""
+
+    aviso = (
+        f"Ajuste técnico CoreSync: horário deslocado em "
+        f"+{segundos}s por colisão de venda no Sankhya."
+    )
+
+    if aviso not in observacao:
+        novo_payload["AD_OBSFIN"] = (
+            f"{observacao}\n\n{aviso}"
+        ).strip()
+
+    return novo_payload
+
+
+def enviar_pedido_sankhya_com_retry_colisao(
+    sankhya_client,
+    payload: dict,
+    numero_pedido: str,
+    logger,
+):
+    try:
+        return sankhya_client.incluir_pedido(payload), payload
+
+    except Exception as exc:
+        if not erro_colisao_data_hora_sankhya(exc):
+            raise
+
+        logger.warning(
+            "Colisão de data/hora detectada no Sankhya "
+            "para pedido Wake %s. Tentando horário ajustado.",
+            numero_pedido,
+        )
+
+        ultimo_erro = exc
+
+        for segundos in range(
+            1,
+            MAX_TENTATIVAS_AJUSTE_HORARIO + 1,
+        ):
+            payload_ajustado = deslocar_data_hora_payload(
+                payload,
+                segundos,
+            )
+
+            logger.warning(
+                "Tentativa +%ss para pedido %s (%s %s)",
+                segundos,
+                numero_pedido,
+                payload_ajustado.get("data"),
+                payload_ajustado.get("hora"),
+            )
+
+            try:
+                resposta = sankhya_client.incluir_pedido(
+                    payload_ajustado
+                )
+
+                logger.warning(
+                    "Pedido %s integrado com horário ajustado "
+                    "em +%ss.",
+                    numero_pedido,
+                    segundos,
+                )
+
+                return resposta, payload_ajustado
+
+            except Exception as retry_exc:
+                ultimo_erro = retry_exc
+
+                if not erro_colisao_data_hora_sankhya(retry_exc):
+                    raise
+
+        raise ultimo_erro
 
 def imprimir_resumo_payload(payload: dict) -> None:
     cliente = payload.get("cliente", {})
@@ -206,7 +312,13 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
 
     try:
         logger.info("Enviando pedido para Sankhya...")
-        resposta = sankhya_client.incluir_pedido(payload)
+
+        resposta, payload = enviar_pedido_sankhya_com_retry_colisao(
+            sankhya_client=sankhya_client,
+            payload=payload,
+            numero_pedido=numero_pedido,
+            logger=logger,
+        )
 
         corrigir_cadastro_cliente_sankhya(
             sankhya_client=sankhya_client,

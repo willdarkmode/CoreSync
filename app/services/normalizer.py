@@ -330,8 +330,8 @@ def obter_sigla_canal(pedido_wake: dict) -> str:
 
 def obter_codigo_venda(pedido_wake: dict) -> str:
     # prioridade: marketplace
-    if pedido_wake.get("marketPlacePedidoId"):
-        return str(pedido_wake["marketPlacePedidoId"])
+    if pedido_wake.get("marketPlacePedidoSiteId"):
+        return str(pedido_wake["marketPlacePedidoSiteId"])
 
     omnichannel = pedido_wake.get("omnichannel") or {}
 
