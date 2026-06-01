@@ -164,6 +164,13 @@ def obter_numero_parcelas_pedido(pedido_wake: dict) -> int:
 
 
 def obter_codigo_condicao_pagamento(pedido_wake: dict, logger=None) -> int:
+    if pedido_eh_marketplace(pedido_wake):
+        if logger:
+            logger.info(
+                "Pedido de marketplace identificado. Usando A VISTA CODTIPVENDA=11."
+            )
+        return 11
+
     parcelas = obter_numero_parcelas_pedido(pedido_wake)
 
     codigo = CONDICOES_PAGAMENTO_MAP.get(parcelas)
@@ -207,7 +214,6 @@ def extrair_dias_prazo_envio(pedido_wake: dict, logger=None) -> int | None:
 
     prazo_texto = str(frete.get("prazoEnvioTexto") or "").strip().lower()
     if prazo_texto:
-        import re
 
         match = re.search(r"(\d+)", prazo_texto)
         if match:
@@ -273,6 +279,27 @@ def calcular_previsao_entrega(pedido_wake: dict, logger=None) -> str:
 def normalizar_texto(valor: str) -> str:
     return str(valor or "").strip().lower()
 
+def pedido_eh_marketplace(pedido_wake: dict) -> bool:
+    canal = (
+        pedido_wake.get("canalNome")
+        or pedido_wake.get("canalOrigem")
+        or ""
+    ).strip().lower()
+
+    marketplaces = {
+        "mercado livre",
+        "magalu",
+        "amazon",
+        "shopee",
+    }
+
+    if canal in marketplaces:
+        return True
+
+    if pedido_wake.get("marketPlacePedidoSiteId"):
+        return True
+
+    return False
 
 def obter_codigo_transportadora(pedido_wake: dict, logger=None) -> int | None:
     frete = pedido_wake.get("frete") or {}
@@ -545,6 +572,19 @@ def montar_financeiros(
     data_base = pedido_wake.get("dataPagamento") or pedido_wake.get("data")
     data_base_dt = parse_datetime_iso_flex(data_base)
     valor_total_dec = money_2(to_decimal(valor_total))
+
+    if pedido_eh_marketplace(pedido_wake):
+        tipo_pagamento = pagamento_mapper.obter_tipo_pagamento(
+            pedido_wake,
+            None,
+        )
+
+        return [{
+            "sequencia": 1,
+            "tipoPagamento": tipo_pagamento,
+            "dataVencimento": data_base_dt.strftime("%d/%m/%Y"),
+            "valorParcela": float(valor_total_dec),
+        }]
 
     if not pagamentos:
         return [{
