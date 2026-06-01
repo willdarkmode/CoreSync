@@ -310,6 +310,8 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
         logger.info("Reservando pedido para idempotência...")
         idempotency_service.reservar(numero_pedido, payload)
 
+    codparc_sankhya = None    
+
     try:
         logger.info("Enviando pedido para Sankhya...")
 
@@ -320,7 +322,7 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
             logger=logger,
         )
 
-        corrigir_cadastro_cliente_sankhya(
+        codparc_sankhya = corrigir_cadastro_cliente_sankhya(
             sankhya_client=sankhya_client,
             payload=payload,
             resposta=resposta,
@@ -355,6 +357,9 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
     if codigo_pedido_sankhya:
         print(f"Pedido Sankhya: {codigo_pedido_sankhya}")
 
+    if codparc_sankhya:
+        print(f"Parceiro Sankhya: {codparc_sankhya}")
+
     logger.info("Atualizando status do pedido na Wake para Separado...")
 
     resposta_status_wake = wake_client.atualizar_status_se_pago(
@@ -384,7 +389,7 @@ def corrigir_cadastro_cliente_sankhya(
     payload: dict,
     resposta: dict,
     logger,
-):
+) -> int | None:
     try:
         codigo_pedido = (
             resposta.get("retorno", {}).get("codigoPedido")
@@ -397,7 +402,7 @@ def corrigir_cadastro_cliente_sankhya(
                 "Não foi possível atualizar cadastro do cliente: codigoPedido não encontrado. Resposta=%s",
                 resposta,
             )
-            return
+            return None
 
         logger.info("Buscando CODPARC pelo pedido Sankhya %s...", codigo_pedido)
 
@@ -408,7 +413,7 @@ def corrigir_cadastro_cliente_sankhya(
                 "Não foi possível atualizar cadastro do cliente: CODPARC não encontrado para o pedido %s.",
                 codigo_pedido,
             )
-            return
+            return None
 
         logger.info(
             "Atualizando empresas do parceiro %s: CODEMP 1/2 com CODTAB 0",
@@ -449,11 +454,14 @@ def corrigir_cadastro_cliente_sankhya(
             codparc,
         )
 
+        return codparc
+
     except Exception as exc:
         logger.exception(
             "Erro ao atualizar cadastro do parceiro após inclusão do pedido: %s",
             exc,
         )
+        return None
 
 def main():
     settings = get_settings()
