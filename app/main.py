@@ -408,6 +408,13 @@ def corrigir_cadastro_cliente_sankhya(
 
         codparc = sankhya_client.buscar_codparc_por_pedido(codigo_pedido)
 
+        if int(codparc) == 1:
+            logger.error(
+                "Pedido criado com CODPARC=1. Bloqueado update do parceiro 1. "
+                "Verifique dados atípicos do pedido Wake/Anymarket."
+            )
+            return None
+
         if not codparc:
             logger.warning(
                 "Não foi possível atualizar cadastro do cliente: CODPARC não encontrado para o pedido %s.",
