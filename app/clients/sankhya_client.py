@@ -406,3 +406,65 @@ class SankhyaClient:
         )
 
         return retorno
+
+    def confirmar_pedido(self, nunota: str | int) -> dict:
+        bearer_token = self.obter_bearer_token()
+
+        url = (
+            f"{self.base_url}"
+            "/gateway/v1/mgecom/service.sbr"
+            "?serviceName=CACSP.confirmarNota&outputType=json"
+        )
+
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "Authorization": f"Bearer {bearer_token}",
+        }
+
+        payload = {
+            "serviceName": "ServicosNfeSP.confirmarNota",
+            "requestBody": {
+                "nota": {
+                    "compensarNotaAutomaticamente": "false",
+                    "NUNOTA": {
+                        "$": str(nunota)
+                    },
+                },
+                "clientEventList": {
+                    "clientEvent": [
+                        {
+                            "$": "br.com.sankhya.actionbutton.clientconfirm"
+                        }
+                    ]
+                },
+            },
+        }
+
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+
+            try:
+                return response.json()
+            except ValueError:
+                return {
+                    "raw_response": response.text,
+                    "status_code": response.status_code,
+                }
+
+        except requests.HTTPError as exc:
+            detalhe = response.text if exc.response is not None else ""
+            raise SankhyaAPIError(
+                f"Erro HTTP ao confirmar pedido/nota {nunota}: {detalhe}"
+            ) from exc
+
+        except requests.RequestException as exc:
+            raise SankhyaAPIError(
+                f"Falha ao confirmar pedido/nota {nunota}: {exc}"
+            ) from exc    

@@ -329,6 +329,30 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
             logger=logger,
         )
 
+        codigo_pedido_sankhya = (
+            resposta.get("retorno", {}).get("codigoPedido")
+            or resposta.get("codigoPedido")
+            or resposta.get("codigo")
+        )
+
+        if codigo_pedido_sankhya:
+            logger.info(
+                "Confirmando pedido Sankhya automaticamente: %s",
+                codigo_pedido_sankhya,
+            )
+
+            resposta_confirmacao = (
+                sankhya_client.confirmar_pedido(
+                    codigo_pedido_sankhya
+                )
+            )
+
+            logger.info(
+                "Pedido %s confirmado. Resposta=%s",
+                codigo_pedido_sankhya,
+                resposta_confirmacao,
+            )
+
     except Exception as exc:
         if idempotency_service:
             idempotency_service.marcar_falha(numero_pedido, exc)
@@ -336,6 +360,7 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
 
     codigo_pedido_sankhya = (
         resposta.get("retorno", {}).get("codigoPedido")
+        or resposta.get("codigoPedido")
         or resposta.get("codigo")
     )
 
@@ -409,11 +434,19 @@ def corrigir_cadastro_cliente_sankhya(
         codparc = sankhya_client.buscar_codparc_por_pedido(codigo_pedido)
 
         if int(codparc) == 1:
+            cliente = payload.get("cliente", {})
+
             logger.error(
-                "Pedido criado com CODPARC=1. Bloqueado update do parceiro 1. "
-                "Verifique dados atípicos do pedido Wake/Anymarket."
+                "Pedido criado com CODPARC=1. Cliente=%s | Resposta Sankhya=%s",
+                cliente,
+                resposta,
             )
-            return None
+
+            raise IntegracaoError(
+                "Pedido criado com CODPARC=1. "
+                "O Sankhya usou o parceiro padrão em vez de cadastrar/vincular o cliente. "
+                "Integração bloqueada para evitar confirmação indevida."
+            )
 
         if not codparc:
             logger.warning(
@@ -462,6 +495,9 @@ def corrigir_cadastro_cliente_sankhya(
         )
 
         return codparc
+
+    except IntegracaoError:
+        raise
 
     except Exception as exc:
         logger.exception(

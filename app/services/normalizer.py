@@ -757,7 +757,7 @@ def normalizar_pedido_wake(
             "tipo": obter_tipo_cliente(usuario),
             "endereco": {
                 "logradouro": endereco.get("logradouro") or endereco.get("endereco") or "",
-                "numero": somente_digitos(str(endereco.get("numero", "")))[:6],
+                "numero": somente_digitos(str(endereco.get("numero", "")))[:6] or "0",
                 "complemento": str(endereco.get("complemento") or "")[:30],
                 "bairro": endereco.get("bairro", ""),
                 "cidade": endereco.get("cidade", ""),
