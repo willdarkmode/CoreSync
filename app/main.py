@@ -262,9 +262,34 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
 
     validar_pedido_normalizado(pedido_normalizado)
 
+    cliente = pedido_normalizado["cliente"]
+    tipo_cliente = cliente.get("tipo")
+    ie_rg = (cliente.get("ieRg") or "").strip()
+
+    cliente_eh_revenda = (
+        tipo_cliente == "PJ"
+        and ie_rg
+        and ie_rg.upper() != "ISENTO"
+    )
+
+    codigo_cliente_fiscal_calculo = (
+        settings.codigo_cliente_fiscal_referencia_revenda
+        if cliente_eh_revenda
+        else settings.codigo_cliente_fiscal_referencia
+    )
+
+    logger.info(
+        "Cliente fiscal para cálculo de IPI: %s | tipo=%s | IE=%s | revenda=%s",
+        codigo_cliente_fiscal_calculo,
+        tipo_cliente,
+        ie_rg,
+        cliente_eh_revenda,
+    )
+
     logger.info("Calculando compensações de IPI...")
     compensacoes = ipi_service.calcular_compensacoes(
         itens=pedido_normalizado["itens"],
+        codigo_cliente=codigo_cliente_fiscal_calculo,
     )
 
     comp_map = {int(c["sequencia"]): c for c in compensacoes}
@@ -479,21 +504,7 @@ def corrigir_cadastro_cliente_sankhya(
 
         logger.info("Endereço do parceiro %s atualizado com sucesso.", codparc)
 
-        logger.info(
-            "Atualizando CLASSIFICMS do parceiro %s para C.",
-            codparc,
-        )
-
-        sankhya_client.atualizar_classificms_cliente(
-            codparc=codparc,
-            classificms="C",
-        )
-
-        logger.info(
-            "CLASSIFICMS do parceiro %s atualizado para C.",
-            codparc,
-        )
-
+        
         return codparc
 
     except IntegracaoError:

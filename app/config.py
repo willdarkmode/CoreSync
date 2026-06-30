@@ -19,6 +19,7 @@ class Settings:
     sankhya_client_secret: str
     sankhya_base_url: str
     codigo_cliente_fiscal_referencia: int
+    codigo_cliente_fiscal_referencia_revenda: int
     codigo_empresa: int
     codigo_vendedor: int
     tipo_pagamento_padrao: int
@@ -44,7 +45,15 @@ def get_settings() -> Settings:
         sankhya_client_id=os.getenv("SANKHYA_CLIENT_ID", "").strip(),
         sankhya_client_secret=os.getenv("SANKHYA_CLIENT_SECRET", "").strip(),
         sankhya_base_url=os.getenv("SANKHYA_BASE_URL", "https://api.sankhya.com.br").strip(),
-        codigo_cliente_fiscal_referencia=int(os.getenv("CODIGO_CLIENTE_FISCAL_REFERENCIA", "10570")),
+        codigo_cliente_fiscal_referencia=int(
+            os.getenv("CODIGO_CLIENTE_FISCAL_REFERENCIA", "10570")
+        ),
+        codigo_cliente_fiscal_referencia_revenda=int(
+            os.getenv(
+                "CODIGO_CLIENTE_FISCAL_REFERENCIA_REVENDA",
+                os.getenv("CODIGO_CLIENTE_FISCAL_REFERENCIA", "10570"),
+            )
+        ),
         codigo_empresa=int(os.getenv("CODIGO_EMPRESA", "1")),
         codigo_vendedor=int(os.getenv("CODIGO_VENDEDOR", "28")),
         tipo_pagamento_padrao=int(os.getenv("TIPO_PAGAMENTO_PADRAO", "11")),

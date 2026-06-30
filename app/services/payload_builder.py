@@ -64,7 +64,7 @@ class PayloadBuilder:
         else:
             cod_tip_parc = "10200000"
             ie_payload = ie
-            classificms = "C"
+            classificms = "R"
         
         itens_payload = []
         for item in pedido_norm["itens"]:

@@ -69,7 +69,11 @@ class IpiCompensationService:
         candidatos.sort(key=lambda x: (x[0], abs(x[1] - desconto_aprox)))
         return candidatos[0][1]    
 
-    def calcular_compensacoes(self, itens: list[dict]) -> list[dict]:
+    def calcular_compensacoes(
+        self,
+        itens: list[dict],
+        codigo_cliente: int | None = None,
+    ) -> list[dict]:
         produtos_payload = []
 
         for item in itens:
@@ -83,7 +87,7 @@ class IpiCompensationService:
 
         payload = {
             "notaModelo": self.nota_modelo,
-            "codigoCliente": self.codigo_cliente_referencia,
+            "codigoCliente": codigo_cliente or self.codigo_cliente_referencia,
             "produtos": produtos_payload,
         }
 
