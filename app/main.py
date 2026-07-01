@@ -495,6 +495,31 @@ def corrigir_cadastro_cliente_sankhya(
         cliente_payload = payload.get("cliente", {})
         endereco_payload = cliente_payload.get("endereco", {})
 
+        classificms_payload = cliente_payload.get("CLASSIFICMS")
+
+        if classificms_payload:
+            logger.info(
+                "Atualizando CLASSIFICMS do parceiro %s para %s.",
+                codparc,
+                classificms_payload,
+            )
+
+            sankhya_client.atualizar_classificms_cliente(
+                codparc=codparc,
+                classificms=classificms_payload,
+            )
+
+            logger.info(
+                "CLASSIFICMS do parceiro %s atualizado para %s com sucesso.",
+                codparc,
+                classificms_payload,
+            )
+        else:
+            logger.warning(
+                "CLASSIFICMS não encontrado no payload do cliente para o parceiro %s.",
+                codparc,
+            )
+
         logger.info("Atualizando endereço do parceiro %s.", codparc)
 
         sankhya_client.atualizar_endereco_cliente(
