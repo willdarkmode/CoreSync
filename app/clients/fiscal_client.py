@@ -26,5 +26,18 @@ class FiscalClient:
             timeout=self.timeout
         )
 
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+
+        except requests.HTTPError as exc:
+            raise requests.HTTPError(
+                (
+                    f"Erro ao calcular impostos no Sankhya. "
+                    f"status={response.status_code} | "
+                    f"resposta={response.text} | "
+                    f"payload={payload}"
+                ),
+                response=response,
+            ) from exc
+
         return response.json()

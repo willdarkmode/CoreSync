@@ -464,32 +464,90 @@ def mapear_frete_para_cif_fob(pedido_wake: dict, logger=None) -> str:
     return "C"
 
 def calcular_valor_unitario_final(item: dict) -> float:
-    valor_unitario = safe_float(
-        item.get("valorItem")
-        or item.get("precoPor")
-        or item.get("precoVenda")
-        or 0,
-        0.0,
-    )
+   
+    if item.get("valorItem") is not None:
+        valor_unitario = safe_float(
+            item.get("valorItem"),
+            0.0,
+        )
+    elif item.get("precoVenda") is not None:
+        valor_unitario = safe_float(
+            item.get("precoVenda"),
+            0.0,
+        )
+    else:
+        valor_unitario = safe_float(
+            item.get("precoPor"),
+            0.0,
+        )
 
-    total_ajustes_unitario = 0.0
-    quantidade = safe_float(item.get("quantidade", 1), 1.0)
+    quantidade = safe_float(
+        item.get("quantidade", 1),
+        1.0,
+    )
 
     if quantidade <= 0:
         quantidade = 1.0
 
-    for ajuste in item.get("ajustes", []):
-        nome_ajuste = str(ajuste.get("nome") or "").strip().lower()
+    preco_por = safe_float(
+        item.get("precoPor"),
+        0.0,
+    )
 
-        if nome_ajuste == "frete":
+    preco_venda = safe_float(
+        item.get("precoVenda"),
+        preco_por,
+    )
+
+    desconto_item = safe_float(
+        item.get("desconto"),
+        0.0,
+    )
+
+    desconto_ja_embutido = (
+        desconto_item != 0
+        and abs(
+            (preco_por + desconto_item) - preco_venda
+        ) <= 0.02
+    )
+
+    total_ajustes_unitario = 0.0
+
+    for ajuste in item.get("ajustes") or []:
+        tipo_ajuste = ajuste.get("tipo")
+
+        nome_ajuste = str(
+            ajuste.get("nome") or ""
+        ).strip().lower()
+
+        valor_ajuste = safe_float(
+            ajuste.get("valor"),
+            0.0,
+        )
+
+        # Frete já será enviado separadamente no cabeçalho.
+        if tipo_ajuste == 1 or nome_ajuste == "frete":
             continue
 
-        valor_ajuste = safe_float(ajuste.get("valor", 0), 0.0)
+        # Promoção específica de produto já incorporada
+        # em precoVenda/valorItem.
+        if (
+            desconto_ja_embutido
+            and (
+                tipo_ajuste == 10
+                or nome_ajuste == "promocaoproduto"
+            )
+        ):
+            continue
 
-        # Se o ajuste vier como total do item, rateia por unidade
-        total_ajustes_unitario += valor_ajuste / quantidade
+        total_ajustes_unitario += (
+            valor_ajuste / quantidade
+        )
 
-    return round(valor_unitario + total_ajustes_unitario, 2)
+    return round(
+        valor_unitario + total_ajustes_unitario,
+        2,
+    )
 
 
 def calcular_valor_total_item(item: dict) -> Decimal:

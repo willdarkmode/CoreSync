@@ -310,22 +310,9 @@ def processar_pedido(numero_pedido: str, settings, logger) -> None:
 
     imprimir_resumo_payload(payload)
 
-    while True:
-        confirmar = input(
-            "\nEnviar para o Sankhya? "
-            "(s = sim / n = não / d = detalhes): "
-        ).strip().lower()
-
-        if confirmar == "d":
-            print("\nPayload completo:")
-            print(json.dumps(payload, indent=2, ensure_ascii=False))
-            continue
-
-        if confirmar == "s":
-            break
-
-        print("Envio cancelado pelo usuário.")
-        return
+    logger.info(
+        "Pedido validado. Prosseguindo automaticamente com o envio para o Sankhya..."
+    )
 
     if not settings.permitir_envio:
         print("PERMITIR_ENVIO=false. Apenas simulação.")
