@@ -65,7 +65,7 @@ class PayloadBuilder:
             cod_tip_parc = "10200000"
             ie_payload = ie
             classificms = "R"
-        
+
         itens_payload = []
         for item in pedido_norm["itens"]:
             item_payload = {
@@ -132,6 +132,11 @@ class PayloadBuilder:
             "itens": itens_payload,
             "financeiros": pedido_norm["financeiros"],
         }
+
+        observacao_almox = pedido_norm.get("observacaoAlmox")
+        if observacao_almox:
+            payload["AD_OBSALMOX"] = observacao_almox
+
         codigo_transportadora = pedido_norm.get("codigoTransportadora")
 
         if codigo_transportadora:
