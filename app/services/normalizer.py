@@ -1,6 +1,7 @@
 from decimal import Decimal
 import re
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from app.services import cnpj_service
 from app.utils import (
@@ -50,6 +51,7 @@ CONDICOES_PAGAMENTO_MAP = {
     12: 165,  # 12X CARTAO
 }
 
+
 def obter_endereco_entrega(pedido_wake: dict) -> dict:
     enderecos = pedido_wake.get("pedidoEndereco", [])
     for endereco in enderecos:
@@ -71,6 +73,7 @@ def obter_tipo_cliente(usuario: dict) -> str:
     tipo = (usuario.get("tipoPessoa") or "").strip().lower()
     return "PF" if tipo == "fisica" else "PJ"
 
+
 def pedido_eh_fulfillment(obj) -> bool:
     if isinstance(obj, dict):
         chave = str(obj.get("chave") or "").strip().lower()
@@ -85,6 +88,7 @@ def pedido_eh_fulfillment(obj) -> bool:
         return any(pedido_eh_fulfillment(item) for item in obj)
 
     return False
+
 
 def enriquecer_ie_cliente(cliente: dict, cnpj_service=None, logger=None) -> dict:
     tipo = cliente.get("tipo")
@@ -137,6 +141,7 @@ def enriquecer_ie_cliente(cliente: dict, cnpj_service=None, logger=None) -> dict
 
     return cliente
 
+
 def obter_valor_grupo_info_cadastral(usuario: dict, chave: str) -> str:
     grupos = usuario.get("grupoInformacaoCadastral") or []
     chave_normalizada = (chave or "").strip().lower()
@@ -147,6 +152,7 @@ def obter_valor_grupo_info_cadastral(usuario: dict, chave: str) -> str:
             return str(item.get("valor") or "").strip()
 
     return ""
+
 
 def obter_numero_parcelas_pedido(pedido_wake: dict) -> int:
     pagamentos = pedido_wake.get("pagamento") or []
@@ -192,6 +198,7 @@ def obter_codigo_condicao_pagamento(pedido_wake: dict, logger=None) -> int:
 
     return 11
 
+
 def extrair_dias_prazo_envio(pedido_wake: dict, logger=None) -> int | None:
     frete = pedido_wake.get("frete") or {}
 
@@ -214,7 +221,6 @@ def extrair_dias_prazo_envio(pedido_wake: dict, logger=None) -> int | None:
 
     prazo_texto = str(frete.get("prazoEnvioTexto") or "").strip().lower()
     if prazo_texto:
-
         match = re.search(r"(\d+)", prazo_texto)
         if match:
             dias = int(match.group(1))
@@ -236,6 +242,7 @@ def extrair_dias_prazo_envio(pedido_wake: dict, logger=None) -> int | None:
         logger.info("Prazo de envio não informado na Wake.")
 
     return None
+
 
 def calcular_previsao_entrega(pedido_wake: dict, logger=None) -> str:
     data_pedido_raw = (
@@ -276,8 +283,53 @@ def calcular_previsao_entrega(pedido_wake: dict, logger=None) -> str:
 
     return data_prevista
 
+
+def montar_observacao_almox(pedido_wake: dict, logger=None) -> str:
+    frete = pedido_wake.get("frete") or {}
+    informacoes = frete.get("informacoesAdicionais") or []
+
+    for item in informacoes:
+        chave = str(item.get("chave") or "").strip().lower()
+
+        if chave != "data agendada de envio/coleta":
+            continue
+
+        valor = str(item.get("valor") or "").strip()
+        if not valor:
+            return ""
+
+        try:
+            dt = parse_datetime_iso_flex(valor)
+
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(ZoneInfo("America/Sao_Paulo"))
+
+            data_formatada = dt.strftime("%d/%m/%Y")
+
+            if logger:
+                logger.info(
+                    "Data agendada de envio/coleta identificada na Wake: %s -> %s",
+                    valor,
+                    data_formatada,
+                )
+
+            return f"Data agendada de envio/coleta: {data_formatada}"
+
+        except (TypeError, ValueError) as exc:
+            if logger:
+                logger.warning(
+                    "Data agendada de envio/coleta inválida na Wake: '%s'. Erro: %s",
+                    valor,
+                    exc,
+                )
+            return ""
+
+    return ""
+
+
 def normalizar_texto(valor: str) -> str:
     return str(valor or "").strip().lower()
+
 
 def pedido_eh_marketplace(pedido_wake: dict) -> bool:
     canal = (
@@ -301,6 +353,7 @@ def pedido_eh_marketplace(pedido_wake: dict) -> bool:
 
     return False
 
+
 def obter_codigo_transportadora(pedido_wake: dict, logger=None) -> int | None:
     frete = pedido_wake.get("frete") or {}
 
@@ -318,14 +371,12 @@ def obter_codigo_transportadora(pedido_wake: dict, logger=None) -> int | None:
         if c
     ]
 
-    # 🔥 1. match exato (prioridade máxima)
     for nome in candidatos:
         for regra in TRANSPORTADORAS_CONFIG:
             for termo in regra.get("match_exato", []):
                 if nome == termo:
                     return regra["codigo"]
 
-    # 🔥 2. match parcial (fallback)
     for nome in candidatos:
         for regra in TRANSPORTADORAS_CONFIG:
             for termo in regra.get("match_contem", []):
@@ -336,6 +387,7 @@ def obter_codigo_transportadora(pedido_wake: dict, logger=None) -> int | None:
         logger.warning(f"Transportadora não identificada: {candidatos}")
 
     return None
+
 
 def obter_sigla_canal(pedido_wake: dict) -> str:
     canal = (
@@ -356,7 +408,6 @@ def obter_sigla_canal(pedido_wake: dict) -> str:
 
 
 def obter_codigo_venda(pedido_wake: dict) -> str:
-    # prioridade: marketplace
     if pedido_wake.get("marketPlacePedidoSiteId"):
         return str(pedido_wake["marketPlacePedidoSiteId"])
 
@@ -368,7 +419,6 @@ def obter_codigo_venda(pedido_wake: dict) -> str:
     if omnichannel.get("pedidoIdPublico"):
         return str(omnichannel["pedidoIdPublico"])
 
-    # fallback: pedido interno
     return str(pedido_wake.get("pedidoId") or "")
 
 
@@ -390,6 +440,7 @@ def montar_observacao_financeira(pedido_wake: dict) -> str:
     data = formatar_data_obsfin(pedido_wake.get("data"))
 
     return f"{sigla}\n\nVenda #{codigo} {data}"
+
 
 def mapear_finalidade_compra_para_nufop(pedido_wake: dict, logger=None) -> int:
     usuario = pedido_wake.get("usuario") or {}
@@ -421,6 +472,7 @@ def mapear_finalidade_compra_para_nufop(pedido_wake: dict, logger=None) -> int:
 
     return nufop
 
+
 def obter_valor_frete(pedido_wake: dict) -> float:
     frete = pedido_wake.get("frete") or {}
 
@@ -433,7 +485,8 @@ def obter_valor_frete(pedido_wake: dict) -> float:
             0.0,
         ),
         2,
-    ) 
+    )
+
 
 def mapear_frete_para_cif_fob(pedido_wake: dict, logger=None) -> str:
     frete = pedido_wake.get("frete") or {}
@@ -463,8 +516,8 @@ def mapear_frete_para_cif_fob(pedido_wake: dict, logger=None) -> str:
 
     return "C"
 
+
 def calcular_valor_unitario_final(item: dict) -> float:
-   
     if item.get("valorItem") is not None:
         valor_unitario = safe_float(
             item.get("valorItem"),
@@ -525,12 +578,9 @@ def calcular_valor_unitario_final(item: dict) -> float:
             0.0,
         )
 
-        # Frete já será enviado separadamente no cabeçalho.
         if tipo_ajuste == 1 or nome_ajuste == "frete":
             continue
 
-        # Promoção específica de produto já incorporada
-        # em precoVenda/valorItem.
         if (
             desconto_ja_embutido
             and (
@@ -557,10 +607,6 @@ def calcular_valor_total_item(item: dict) -> Decimal:
 
 
 def extrair_aliquota_ipi_item(item_wake: dict) -> Decimal:
-    """
-    Tenta descobrir a alíquota de IPI no item da Wake.
-    Ajuste esta função conforme o shape real do payload recebido.
-    """
     candidatos_diretos = [
         item_wake.get("aliquotaIPI"),
         item_wake.get("aliquotaIpi"),
@@ -574,7 +620,6 @@ def extrair_aliquota_ipi_item(item_wake: dict) -> Decimal:
         if dec > 0:
             return dec
 
-    # procura em possíveis blocos de impostos
     blocos = []
     for chave in ("impostos", "tributos", "taxas"):
         valor = item_wake.get(chave)
@@ -593,9 +638,6 @@ def extrair_aliquota_ipi_item(item_wake: dict) -> Decimal:
 
 
 def calcular_compensacao_ipi_item(item_wake: dict) -> dict:
-    """
-    Calcula o desconto necessário para neutralizar o acréscimo do IPI no total.
-    """
     base_item = calcular_valor_total_item(item_wake)
     aliquota_ipi = extrair_aliquota_ipi_item(item_wake)
 
@@ -801,6 +843,7 @@ def normalizar_pedido_wake(
         "hora": hora_fmt,
         "valorTotal": valor_total,
         "observacaoFinanceira": montar_observacao_financeira(pedido_wake),
+        "observacaoAlmox": montar_observacao_almox(pedido_wake, logger=logger),
         "nufop": mapear_finalidade_compra_para_nufop(pedido_wake, logger=logger),
         "cifFob": mapear_frete_para_cif_fob(pedido_wake, logger=logger),
         "previsaoEntrega": calcular_previsao_entrega(pedido_wake, logger=logger),
