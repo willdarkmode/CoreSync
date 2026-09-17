@@ -38,6 +38,7 @@ class Settings:
     automatic_start_at: str
     automatic_poll_seconds: int
     automatic_page_size: int
+    automatic_dry_run: bool
     wake_status_pago: int
     wake_status_separado: int
 
@@ -80,6 +81,7 @@ def get_settings() -> Settings:
             max(int(os.getenv("AUTOMATIC_PAGE_SIZE", "50")), 1),
             50,
         ),
+        automatic_dry_run=_get_bool("AUTOMATIC_DRY_RUN", True),
         wake_status_pago=int(os.getenv("WAKE_STATUS_PAGO", "1")),
         wake_status_separado=int(os.getenv("WAKE_STATUS_SEPARADO", "16")),
     )
