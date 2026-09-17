@@ -1,6 +1,7 @@
 import math
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.clients.wake_client import WakeClient
 from app.config import get_settings, validar_config
@@ -16,6 +17,7 @@ from app.utils import parse_datetime_iso_flex
 
 FORMATO_DATA_WAKE = "%Y-%m-%d %H:%M:%S"
 LOOKBACK_PEDIDOS_DIAS = 90
+FUSO_LOCAL = ZoneInfo("America/Sao_Paulo")
 
 
 def parse_automatic_start_at(value: str) -> datetime:
@@ -38,11 +40,15 @@ def parse_automatic_start_at(value: str) -> datetime:
 
 def normalizar_datetime_local(dt: datetime) -> datetime:
     if dt.tzinfo is not None:
-        return dt.replace(tzinfo=None)
+        return dt.astimezone(FUSO_LOCAL).replace(tzinfo=None)
     return dt
 
 
-def pedido_atingiu_corte(pedido: dict, inicio_automatico: datetime) -> bool:
+def parse_datetime_local(value: str) -> datetime:
+    return normalizar_datetime_local(parse_datetime_iso_flex(value))
+
+
+def obter_datetime_referencia(pedido: dict) -> datetime | None:
     candidatos = [
         pedido.get("dataPagamento"),
         pedido.get("dataUltimaAtualizacao"),
@@ -54,12 +60,86 @@ def pedido_atingiu_corte(pedido: dict, inicio_automatico: datetime) -> bool:
             continue
 
         try:
-            dt = normalizar_datetime_local(parse_datetime_iso_flex(valor))
-            return dt >= inicio_automatico
+            return parse_datetime_local(valor)
         except (TypeError, ValueError):
             continue
 
-    return False
+    return None
+
+
+def pedido_atingiu_corte(pedido: dict, inicio_automatico: datetime) -> bool:
+    dt_referencia = obter_datetime_referencia(pedido)
+    return bool(dt_referencia and dt_referencia >= inicio_automatico)
+
+
+def chave_ordenacao_pedido(pedido: dict) -> tuple[datetime, int]:
+    dt_referencia = obter_datetime_referencia(pedido) or datetime.max
+
+    try:
+        pedido_id = int(pedido.get("pedidoId") or 0)
+    except (TypeError, ValueError):
+        pedido_id = 0
+
+    return dt_referencia, pedido_id
+
+
+def formatar_datetime_log(value: str | None) -> str:
+    if not value:
+        return "N/D"
+
+    try:
+        return parse_datetime_local(value).strftime("%d/%m/%Y %H:%M:%S")
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def formatar_valor_brl(valor) -> str:
+    try:
+        numero = float(valor or 0)
+    except (TypeError, ValueError):
+        numero = 0.0
+
+    texto = f"{numero:,.2f}"
+    texto = texto.replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {texto}"
+
+
+def obter_pedido_marketplace(pedido: dict) -> str:
+    codigo = (
+        pedido.get("marketPlacePedidoSiteId")
+        or pedido.get("marketPlacePedidoId")
+    )
+
+    if codigo:
+        return str(codigo)
+
+    omnichannel = pedido.get("omnichannel") or {}
+    return str(
+        omnichannel.get("pedidoIdPrivado")
+        or omnichannel.get("pedidoIdPublico")
+        or "N/D"
+    )
+
+
+def obter_data_agendada_envio(pedido: dict) -> str:
+    frete = pedido.get("frete") or {}
+    informacoes = frete.get("informacoesAdicionais") or []
+
+    for item in informacoes:
+        chave = str(item.get("chave") or "").strip().lower()
+        if chave != "data agendada de envio/coleta":
+            continue
+
+        valor = str(item.get("valor") or "").strip()
+        if not valor:
+            return "N/D"
+
+        try:
+            return parse_datetime_local(valor).strftime("%d/%m/%Y")
+        except (TypeError, ValueError):
+            return valor
+
+    return "N/D"
 
 
 def descobrir_pedidos_pago(
@@ -67,7 +147,7 @@ def descobrir_pedidos_pago(
     settings,
     inicio_automatico: datetime,
     logger,
-) -> list[str]:
+) -> list[dict]:
     agora = datetime.now()
 
     data_inicial_consulta = inicio_automatico - timedelta(days=LOOKBACK_PEDIDOS_DIAS)
@@ -104,7 +184,7 @@ def descobrir_pedidos_pago(
             if not pedido_atingiu_corte(pedido, inicio_automatico):
                 continue
 
-            pedidos_encontrados.append(str(pedido_id))
+            pedidos_encontrados.append(pedido)
 
         if not pedidos:
             break
@@ -119,7 +199,16 @@ def descobrir_pedidos_pago(
 
         pagina += 1
 
-    return list(dict.fromkeys(pedidos_encontrados))
+    pedidos_unicos = {}
+    for pedido in pedidos_encontrados:
+        pedido_id = str(pedido.get("pedidoId"))
+        if pedido_id not in pedidos_unicos:
+            pedidos_unicos[pedido_id] = pedido
+
+    return sorted(
+        pedidos_unicos.values(),
+        key=chave_ordenacao_pedido,
+    )
 
 
 def reparar_status_wake(
@@ -165,10 +254,13 @@ def executar_ciclo(settings, logger, inicio_automatico: datetime) -> None:
         logger.info("Nenhum pedido novo elegível para integração neste ciclo.")
         return
 
+    numeros_pedidos = [str(pedido.get("pedidoId")) for pedido in pedidos]
+
     logger.info(
-        "%s pedido(s) elegível(is) encontrado(s): %s",
+        "%s pedido(s) elegível(is) encontrado(s), ordenados por data de pagamento "
+        "do mais antigo para o mais novo: %s",
         len(pedidos),
-        ", ".join(pedidos),
+        ", ".join(numeros_pedidos),
     )
 
     if settings.automatic_dry_run:
@@ -176,11 +268,33 @@ def executar_ciclo(settings, logger, inicio_automatico: datetime) -> None:
             "AUTOMATIC_DRY_RUN=true: somente leitura. Nenhum pedido será enviado "
             "ao Sankhya e nenhum status será alterado na Wake."
         )
-        for numero_pedido in reversed(pedidos):
-            logger.info("[DRY-RUN] Pedido que seria integrado: %s", numero_pedido)
+
+        for pedido in pedidos:
+            numero_pedido = str(pedido.get("pedidoId"))
+            canal = pedido.get("canalNome") or pedido.get("canalOrigem") or "N/D"
+            status_id = pedido.get("situacaoPedidoId")
+            data_pagamento = formatar_datetime_log(pedido.get("dataPagamento"))
+            pedido_marketplace = obter_pedido_marketplace(pedido)
+            valor_total = formatar_valor_brl(pedido.get("valorTotalPedido"))
+            data_agendada = obter_data_agendada_envio(pedido)
+
+            logger.info(
+                "[DRY-RUN] Pedido Wake=%s | Status=Pago (%s) | Pagamento=%s | "
+                "Canal=%s | Pedido marketplace=%s | Valor=%s | "
+                "Envio/coleta=%s",
+                numero_pedido,
+                status_id,
+                data_pagamento,
+                canal,
+                pedido_marketplace,
+                valor_total,
+                data_agendada,
+            )
         return
 
-    for numero_pedido in reversed(pedidos):
+    for pedido in pedidos:
+        numero_pedido = str(pedido.get("pedidoId"))
+
         try:
             logger.info("Iniciando integração automática do pedido %s.", numero_pedido)
             processar_pedido(numero_pedido, settings, logger)
