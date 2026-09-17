@@ -35,6 +35,11 @@ class Settings:
     idempotency_collection: str
     cnpja_api_key: str
     ipi_strategy: str
+    automatic_start_at: str
+    automatic_poll_seconds: int
+    automatic_page_size: int
+    wake_status_pago: int
+    wake_status_separado: int
 
 
 def get_settings() -> Settings:
@@ -69,7 +74,16 @@ def get_settings() -> Settings:
         idempotency_collection=os.getenv("IDEMPOTENCY_COLLECTION", "pedidos_integrados").strip(),
         cnpja_api_key=os.getenv("CNPJA_API_KEY", "").strip(),
         ipi_strategy=os.getenv("IPI_STRATEGY", "discount_compensation").strip().lower(),
+        automatic_start_at=os.getenv("AUTOMATIC_START_AT", "").strip(),
+        automatic_poll_seconds=int(os.getenv("AUTOMATIC_POLL_SECONDS", "60")),
+        automatic_page_size=min(
+            max(int(os.getenv("AUTOMATIC_PAGE_SIZE", "50")), 1),
+            50,
+        ),
+        wake_status_pago=int(os.getenv("WAKE_STATUS_PAGO", "1")),
+        wake_status_separado=int(os.getenv("WAKE_STATUS_SEPARADO", "16")),
     )
+
 
 def validar_config(settings: Settings) -> None:
     if not settings.wake_auth:
@@ -93,3 +107,6 @@ def validar_config(settings: Settings) -> None:
 
         if not settings.idempotency_collection:
             raise ValueError("IDEMPOTENCY_COLLECTION não configurado")
+
+    if settings.automatic_poll_seconds < 10:
+        raise ValueError("AUTOMATIC_POLL_SECONDS deve ser >= 10")
