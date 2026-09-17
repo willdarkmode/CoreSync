@@ -70,8 +70,6 @@ def descobrir_pedidos_pago(
 ) -> list[str]:
     agora = datetime.now()
 
-    # A API filtra por data do pedido por padrão. O lookback permite capturar
-    # pedidos criados antes da ativação que tenham sido pagos depois dela.
     data_inicial_consulta = inicio_automatico - timedelta(days=LOOKBACK_PEDIDOS_DIAS)
 
     pagina = 1
@@ -121,7 +119,6 @@ def descobrir_pedidos_pago(
 
         pagina += 1
 
-    # Preserva a ordem do retorno e elimina eventuais duplicidades.
     return list(dict.fromkeys(pedidos_encontrados))
 
 
@@ -174,7 +171,15 @@ def executar_ciclo(settings, logger, inicio_automatico: datetime) -> None:
         ", ".join(pedidos),
     )
 
-    # O processamento é intencionalmente sequencial nesta primeira versão.
+    if settings.automatic_dry_run:
+        logger.warning(
+            "AUTOMATIC_DRY_RUN=true: somente leitura. Nenhum pedido será enviado "
+            "ao Sankhya e nenhum status será alterado na Wake."
+        )
+        for numero_pedido in reversed(pedidos):
+            logger.info("[DRY-RUN] Pedido que seria integrado: %s", numero_pedido)
+        return
+
     for numero_pedido in reversed(pedidos):
         try:
             logger.info("Iniciando integração automática do pedido %s.", numero_pedido)
@@ -219,20 +224,32 @@ def executar_ciclo(settings, logger, inicio_automatico: datetime) -> None:
 
 def main() -> None:
     settings = get_settings()
-    validar_config(settings)
     logger = setup_logger(settings.log_level)
+
+    if not settings.wake_auth:
+        raise ValueError("WAKE_AUTH não configurado")
+
+    inicio_automatico = parse_automatic_start_at(settings.automatic_start_at)
+
+    if settings.automatic_dry_run:
+        logger.warning(
+            "CoreSync automático em DRY-RUN. Será executado somente um ciclo de leitura."
+        )
+        executar_ciclo(settings, logger, inicio_automatico)
+        logger.info("Dry-run finalizado. Nenhuma alteração foi realizada.")
+        return
+
+    validar_config(settings)
 
     if not settings.permitir_envio:
         raise ValueError(
-            "O modo automático só deve ser executado com PERMITIR_ENVIO=true."
+            "O modo automático real só deve ser executado com PERMITIR_ENVIO=true."
         )
 
     if not settings.idempotency_enabled:
         raise ValueError(
             "O modo automático exige IDEMPOTENCY_ENABLED=true para impedir duplicidades."
         )
-
-    inicio_automatico = parse_automatic_start_at(settings.automatic_start_at)
 
     logger.info(
         "CoreSync automático iniciado. Corte=%s | intervalo=%ss | status Pago=%s | "
