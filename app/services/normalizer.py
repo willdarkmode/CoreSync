@@ -22,6 +22,10 @@ TRANSPORTADORAS_CONFIG = [
         "match_exato": ["jadlog package", "jadlog"],
     },
     {
+        "codigo": 3544,
+        "match_exato": ["Expresso São Miguel"],
+    },
+    {
         "codigo": 2994,
         "match_exato": ["pac", "sedex"],
         "match_contem": ["correios", "magalu"],
