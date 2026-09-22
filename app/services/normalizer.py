@@ -23,7 +23,8 @@ TRANSPORTADORAS_CONFIG = [
     },
     {
         "codigo": 3544,
-        "match_exato": ["Expresso São Miguel"],
+        "match_exato": ["expresso são miguel"],
+        "match_contem": ["miguel"],
     },
     {
         "codigo": 2994,
